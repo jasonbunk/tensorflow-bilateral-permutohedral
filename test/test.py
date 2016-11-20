@@ -38,9 +38,13 @@ tfcatplaceholder = tf.placeholder(tf.float32, [None,None,None,None], name="tfcat
 
 npwspatial = np.expand_dims(np.expand_dims(np.eye(catim.shape[-1]),0),0).astype(np.float32)
 npwbilateral = npwspatial.copy()
+npwspatial *= 0.0
+npwbilateral *= 0.5
 
 tfwspatial   = tf.constant(npwspatial)
 tfwbilateral = tf.constant(npwbilateral)
+
+totalscalenorm = (npwbilateral.flatten()[0] + npwspatial.flatten()[0])
 
 '''
 .Input("input: T")
@@ -55,8 +59,8 @@ copycat  = libtfgaussiancrf.bilateral_filters(tfcatplaceholder,
                                               tfcatplaceholder,
                                               tfwspatial,
                                               tfwbilateral,
-                                              1.0,
-                                              1.0)
+                                              8.0,
+                                              8.0)
 
 print("constructed the filter!!!!!!!!!!!!!!!!!!!!!!")
 describe("catim",catim)
@@ -71,7 +75,7 @@ sess = tf.InteractiveSession()
 
 tf.initialize_all_variables().run()
 
-npcopycat = NCHW_to_NHWC(copycat.eval({tfcatplaceholder: NHWC_to_NCHW(catim)}))
+npcopycat = NCHW_to_NHWC(copycat.eval({tfcatplaceholder: NHWC_to_NCHW(catim/totalscalenorm)}))
 
 describe("catim",catim)
 describe("npcopycat",npcopycat)
