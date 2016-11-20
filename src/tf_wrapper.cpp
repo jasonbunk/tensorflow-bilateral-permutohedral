@@ -1,102 +1,94 @@
-#include "tensorflow/core/framework/op.h"
-#include "tensorflow/core/framework/op_kernel.h"
 #include <stdio.h>
 #include <assert.h>
+#include <string>
+#include <utility>
+#include <vector>
 
-namespace tensorflow {
-
-/*
-// Getting at the raw tensor data:
-class Tensor {
-public:
-...
-    StringPiece Tensor::tensor_data() const {
-      if (buf_ == nullptr) return StringPiece();  // Don't die for empty tensors
-      return StringPiece(static_cast<char*>(buf_->data()), TotalBytes());
-    }
-...
-}
-
-class StringPiece {
-public:
-...
-    // Return a pointer to the beginning of the referenced data
-    const char* data() const { return data_; }
-
-    // Return the length (in bytes) of the referenced data
-    size_t size() const { return size_; }
-...
-}
-*/
-
-// row-major indexing
-#define offset4(arr,n,h,w,c) (   ((n * arr.dim_size(1) + h) * arr.dim_size(2) + w) * arr.dim_size(3) + c   )
-#define offset3(arr,n,h,w)   (    (n * arr.dim_size(1) + h) * arr.dim_size(2) + w                          )
-#define offset2(arr,n,h)     (     n * arr.dim_size(1) + h                                                 )
-
+#include <boost/shared_array.hpp>
+#include "tensorflow/core/framework/op.h"
+#include "tensorflow/core/framework/op_kernel.h"
 
 typedef Eigen::ThreadPoolDevice CPUDevice;
 typedef Eigen::GpuDevice GPUDevice;
+
+#include "bilateral_interface.hpp"
+
+namespace tensorflow {
 
 template<typename Device, typename T>
 class BilateralFiltersOp: public OpKernel {
 public:
     explicit BilateralFiltersOp(OpKernelConstruction* context) :
             OpKernel(context) {
+        // get scalars
+        OP_REQUIRES_OK(context, context->GetAttr("stdv_spatial_space", &stdv_spatial_space));
+        OP_REQUIRES_OK(context, context->GetAttr("stdv_bilater_space", &stdv_bilater_space));
+        // check scalars
+        OP_REQUIRES(context, stdv_spatial_space > 0.0f,
+            errors::InvalidArgument("require stdv_spatial_space > 0.0, got: ", stdv_spatial_space));
+        OP_REQUIRES(context, stdv_bilater_space > 0.0f,
+            errors::InvalidArgument("require stdv_bilater_space > 0.0, got: ", stdv_bilater_space));
     }
 
     void Compute(OpKernelContext* context) override {
-        const Tensor& input = context->input(0);
+        // inputs
+        Blob<T> blob_input(context->input(0));
+        Blob<T> blob_ftwrt(context->input(1));
+        Blob<T> blob_wspat(context->input(2));
+        Blob<T> blob_wbila(context->input(3));
 
-        printf("Debug BilateralFiltersOp Features: %s \n",input.DebugString().c_str());
+        printf("Compute: blob_input.shape: %s\n",blob_input.tfshape().DebugString().c_str());
+        printf("Compute: blob_ftwrt.shape: %s\n",blob_ftwrt.tfshape().DebugString().c_str());
+        printf("Compute: blob_wspat.shape: %s\n",blob_wspat.tfshape().DebugString().c_str());
+        printf("Compute: blob_wbila.shape: %s\n",blob_wbila.tfshape().DebugString().c_str());
 
+        // output
         Tensor* output = nullptr;
         OP_REQUIRES_OK(context,
-                context->allocate_output(0, input.shape(), &output));
+                context->allocate_output(0, blob_input.tfshape(), &output));
+        Blob<T> blob_ouput(*output);
 
-        printf("input.dims() == %d\n",(int)input.dims());
+        // check 4 dimensional inputs
+        auto err0 = errors::InvalidArgument("shape must be 4-dimensional");
+        OP_REQUIRES(context, blob_input.tfshape().dims() == 4, err0);
+        OP_REQUIRES(context, blob_ftwrt.tfshape().dims() == 4, err0);
+        OP_REQUIRES(context, blob_wspat.tfshape().dims() == 4, err0);
+        OP_REQUIRES(context, blob_wbila.tfshape().dims() == 4, err0);
 
-        //auto in_ten4 =   input.shaped<T,4>({  input.dim_size(0),   input.dim_size(1),   input.dim_size(2),   input.dim_size(3)});
-        //auto ou_ten4 = output->shaped<T,4>({output->dim_size(0), output->dim_size(1), output->dim_size(2), output->dim_size(3)});
+        // input and featswrt must have same minibatch count and spatial dims
+        auto err1 = errors::InvalidArgument("input and featswrt must have same minibatch count and spatial dims");
+        OP_REQUIRES(context, blob_input.tfshape().dim_size(0) == blob_ftwrt.tfshape().dim_size(0), err1);
+        OP_REQUIRES(context, blob_input.tfshape().dim_size(2) == blob_ftwrt.tfshape().dim_size(2), err1);
+        OP_REQUIRES(context, blob_input.tfshape().dim_size(3) == blob_ftwrt.tfshape().dim_size(3), err1);
 
-        StringPiece bottomstring = input.tensor_data();
-        int bottom_numelems = ((int)bottomstring.size()) / ((int)sizeof(T));
-        printf("bottomstring.size == %d, num elems == %d, sizeof(T) == %d\n", (int)bottomstring.size(), (int)bottom_numelems, (int)sizeof(T));
-        /*T* bottom_data = (T*)bottomstring.data();
-        assert(bottom_data != nullptr);
-        //T* top_data    = (T*)output->tensor_data().data();*/
-        const T* bottom_data = input.flat<T>().data();
-        T* top_data = output->flat<T>().data();
+        // filter coefficients must be of shape [1, 1, input_chans, input_chans]
+        auto err2 = errors::InvalidArgument("filter coefficients must be of shape [1, 1, input_chans, input_chans]");
+        OP_REQUIRES(context, blob_wspat.tfshape().dim_size(0) == 1, err2);
+        OP_REQUIRES(context, blob_wspat.tfshape().dim_size(1) == 1, err2);
+        OP_REQUIRES(context, blob_wspat.tfshape().dim_size(2) == blob_input.tfshape().dim_size(1), err2);
+        OP_REQUIRES(context, blob_wspat.tfshape().dim_size(3) == blob_input.tfshape().dim_size(1), err2);
 
-        printf("input.dim_sizes: (%d, %d, %d, %d)\n", (int)input.dim_size(0), (int)input.dim_size(1), (int)input.dim_size(2), (int)input.dim_size(3));
+        OP_REQUIRES(context, blob_wbila.tfshape().dim_size(0) == 1, err2);
+        OP_REQUIRES(context, blob_wbila.tfshape().dim_size(1) == 1, err2);
+        OP_REQUIRES(context, blob_wbila.tfshape().dim_size(2) == blob_input.tfshape().dim_size(1), err2);
+        OP_REQUIRES(context, blob_wbila.tfshape().dim_size(3) == blob_input.tfshape().dim_size(1), err2);
 
-        int inidx;
-        for(int mm=0; mm < input.dim_size(0); ++mm) {
-            for(int ii=0; ii < input.dim_size(1); ++ii) {
-                for(int jj=0; jj<input.dim_size(2); ++jj) {
-                    for(int cc=0; cc<input.dim_size(3); ++cc) {
-                        //top_data[offset4((*output),mm,ii,jj,cc)] = in_ten4(mm,ii,jj,cc);
-                        //ou_ten4(mm,ii,jj,cc) = in_ten4(mm,ii,jj,cc);
-
-                        inidx = offset4(input,mm,ii,jj,cc);
-                        //assert(inidx >= 0);
-                        //assert(inidx < bottom_numelems);
-                        if(inidx < 0 || inidx >= bottom_numelems) {
-                            printf("@@@@@@@@@@@@@@@@@@@@@@ index error: %d: mm %d, ii %d, jj %d, cc %d\n", inidx, mm,ii,jj,cc);
-                            assert(0);
-                        }
-                        //ou_ten4(mm,ii,jj,cc) = bottom_data[inidx];
-                        top_data[inidx] = bottom_data[inidx];
-                    }
-                }
-            }
-        }
-
-        printf("Debug BilateralFiltersOp Output: %s \n",output->DebugString().c_str());
+        BilateralInterface<T> filterer;
+        filterer.OneTimeSetUp(&blob_input,
+                              &blob_ftwrt,
+                              &blob_wspat,
+                              &blob_wbila,
+                              &blob_ouput,
+                              stdv_spatial_space,
+                              stdv_bilater_space);
+        filterer.Forward_cpu();
     }
+
+    float stdv_spatial_space, stdv_bilater_space;
 };
 
 
+#if 0
 template<typename Device, typename T>
 class BilateralFiltersGradOp: public OpKernel {
 public:
@@ -131,30 +123,70 @@ public:
     }
 
 };
+#endif
 
 
 REGISTER_OP("BilateralFilters")
-.Input("features: T")
+.Input("input: T")
+.Input("featswrt: T")
+.Input("wspatial: T")
+.Input("wbilateral: T")
+.Attr("stdv_spatial_space: float = 1.0")
+.Attr("stdv_bilater_space: float = 1.0")
 .Output("output: T")
 .Attr("T: realnumbertype")
 .Doc(R"doc(
 Copies all input values to the output
 )doc");
 
+#if 0
 REGISTER_OP("BilateralFiltersGrad")
-.Input("gradients: T")
-.Input("features: T")
-.Output("backprops: T")
+.Input("orig_input: T")
+.Input("orig_featswrt: T")
+.Input("orig_output: T")
+.Input("grad: T")
+.Output("output: T")
 .Attr("T: realnumbertype")
 .Doc(R"doc(
 TODO!!
 )doc");
 
+Status BilateralFiltersGrad(const AttrSlice& attrs, FunctionDef* g) {
+  // clang-format off
+  *g = FDH::Define(
+    // Arg defs
+    {"input: T", "grad: T"},
+    // Ret val defs
+    {"output: T"},
+    // Attr defs
+    {"T: {float, half} = DT_FLOAT",
+     "ksize: list(int) >= 4",
+     "strides: list(int) >= 4",
+     GetPaddingAttrString()},
+    // Nodes
+    {
+      // Invoke MaxPool again to recompute the outputs (removed by CSE?).
+      {{"maxpool"}, "MaxPool", {"input"},
+       /*Attrs=*/{{"T", "$T"},
+                  {"ksize", "$ksize"},
+                  {"strides", "$strides"},
+                  {"padding", "$padding"}}},
+      {{"output"}, "MaxPoolGrad", {"input", "maxpool", "grad"},
+       /*Attrs=*/{{"T", "$T"},
+                  {"ksize", "$ksize"},
+                  {"strides", "$strides"},
+                  {"padding", "$padding"}}}
+    });
+  // clang-format on
+  return Status::OK();
+}
+REGISTER_OP_GRADIENT("MaxPool", MaxPoolGrad);
+#endif
 
-#define REGISTER_MYBILATERALFILT_KERNELS(type)                                           \
+#define REGISTER_MYBILATERALFILT_KERNELS(type)                                  \
   REGISTER_KERNEL_BUILDER(                                                      \
-      Name("BilateralFilters").Device(DEVICE_CPU).TypeConstraint<type>("T"),              \
-      BilateralFiltersOp<Eigen::ThreadPoolDevice, type>);                                 \
+      Name("BilateralFilters").Device(DEVICE_CPU).TypeConstraint<type>("T"),    \
+      BilateralFiltersOp<Eigen::ThreadPoolDevice, type>);               /*      \
   REGISTER_KERNEL_BUILDER(                                                      \
       Name("BilateralFiltersGrad").Device(DEVICE_CPU).TypeConstraint<type>("T"),          \
       BilateralFiltersGradOp<Eigen::ThreadPoolDevice, type>);                             /*  \
@@ -171,3 +203,27 @@ REGISTER_MYBILATERALFILT_KERNELS(float);
 
 
 }
+
+/*
+// Getting at the raw tensor data:
+class Tensor {
+public:
+...
+    StringPiece Tensor::tensor_data() const {
+      if (buf_ == nullptr) return StringPiece();  // Don't die for empty tensors
+      return StringPiece(static_cast<char*>(buf_->data()), TotalBytes());
+    }
+...
+}
+
+class StringPiece {
+public:
+...
+    // Return a pointer to the beginning of the referenced data
+    const char* data() const { return data_; }
+
+    // Return the length (in bytes) of the referenced data
+    size_t size() const { return size_; }
+...
+}
+*/
