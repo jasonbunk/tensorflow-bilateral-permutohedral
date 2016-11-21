@@ -31,41 +31,61 @@ void BilateralInterface<Dtype>::OneTimeSetUp(
     Blob<Dtype>* const featswrt,
     Blob<Dtype>* const wspatial,
     Blob<Dtype>* const wbilateral,
-    Blob<Dtype>* const output,
     float stdv_spatial_space,
     float stdv_bilateral_space) {
+  OneTimeSetUp(input->tfshape(),
+               featswrt->tfshape(),
+               wspatial->tfshape(),
+               wbilateral->tfshape(),
+               stdv_spatial_space,
+               stdv_bilateral_space);
+}
 
-  // save input/output pointers for when using Forward_x()
-  input_ = input;
-  featswrt_ = featswrt;
-  wspatial_ = wspatial;
-  wbilateral_ = wbilateral;
-  output_ = output;
+/**
+ * To be invoked once only immediately after construction.
+ */
+template <typename Dtype>
+void BilateralInterface<Dtype>::OneTimeSetUp(
+    const TensorShape & input,
+    const TensorShape & featswrt,
+    const TensorShape & wspatial,
+    const TensorShape & wbilateral,
+    float stdv_spatial_space,
+    float stdv_bilateral_space) {
 
   // filter standard deviations
   theta_alpha_ = stdv_bilateral_space;
   theta_gamma_ = stdv_spatial_space;
 
   // save shapes
-  count_ = input->count();
-  num_ = input->num();
-  channels_ = input->channels();
-  height_ = input->height();
-  width_ = input->width();
+  count_ = input.num_elements();
+  num_ = input.dim_size(0);
+  channels_ = input.dim_size(1);
+  height_ = input.dim_size(2);
+  width_ = input.dim_size(3);
   num_pixels_ = height_ * width_;
-  wrt_chans_ = 2 + featswrt->channels();
+  wrt_chans_ = 2 + featswrt.dim_size(1);
 
   // check shapes
-  CHECK(num_ == output->num() && height_ == output->height() && width_ == output->width())
-      << "input and output must have same number in minibatch and same spatial dimensions!";
-  CHECK(num_ == featswrt->num() && height_ == featswrt->height() && width_ == featswrt->width())
+  CHECK(num_ == featswrt.dim_size(0) && height_ == featswrt.dim_size(2) && width_ == featswrt.dim_size(3))
       << "input and featswrt must have same number in minibatch and same spatial dimensions!";
-  CHECK(channels_ == wspatial->shape(2) && channels_ == wspatial->shape(3))
+  CHECK(channels_ == wspatial.dim_size(2) && channels_ == wspatial.dim_size(3))
       << "input and wspatial must have same num channels! "
-      <<channels_<<" != "<<wspatial->shape(2)<<" or "<<wspatial->shape(3);
-  CHECK(channels_ == wbilateral->shape(2) && channels_ == wbilateral->shape(3))
+      <<channels_<<" != "<<wspatial.dim_size(2)<<" or "<<wspatial.dim_size(3);
+  CHECK(channels_ == wbilateral.dim_size(2) && channels_ == wbilateral.dim_size(3))
       << "input and wbilateral must have same num channels! "
-      <<channels_<<" != "<<wbilateral->shape(2)<<" or "<<wbilateral->shape(3);
+      <<channels_<<" != "<<wbilateral.dim_size(2)<<" or "<<wbilateral.dim_size(3);
+
+  OneTimeSetUp_KnownShapes();
+}
+
+/**
+ * To be invoked once only immediately after construction.
+ * This is called after one of the above interfaces that filled in the shapes.
+ */
+template <typename Dtype>
+void BilateralInterface<Dtype>::OneTimeSetUp_KnownShapes() {
+  CHECK(init_cpu == false && init_gpu == false) << "Dont initialize twice!!";
 
   // intermediate blobs
   spatial_out_blob_.Reshape(num_, channels_, height_, width_);
@@ -126,13 +146,18 @@ void BilateralInterface<Dtype>::OneTimeSetUp(
  * Forward pass during the inference.
  */
 template <typename Dtype>
-void BilateralInterface<Dtype>::Forward_cpu() {
+void BilateralInterface<Dtype>::Forward_cpu(
+        Blob<Dtype>* const input,
+        Blob<Dtype>* const featswrt,
+        Blob<Dtype>* const wspatial,
+        Blob<Dtype>* const wbilateral,
+        Blob<Dtype>* const output) {
 
   // Initialize the bilateral lattices.
   bilateral_lattices_.resize(num_);
   for (int n = 0; n < num_; ++n) {
 
-    compute_bilateral_kernel(featswrt_, n, bilateral_kernel_buffer_);
+    compute_bilateral_kernel(featswrt, n, bilateral_kernel_buffer_);
     bilateral_lattices_[n].reset(new ModifiedPermutohedral());
     bilateral_lattices_[n]->init(bilateral_kernel_buffer_, wrt_chans_, width_, height_);
 
@@ -151,7 +176,7 @@ void BilateralInterface<Dtype>::Forward_cpu() {
   for (int n = 0; n < num_; ++n) {
 
     Dtype* spatial_out_data = spatial_out_blob_.mutable_cpu_data() + spatial_out_blob_.offset(n);
-    const Dtype* prob_input_data = input_->cpu_data() + input_->offset(n);
+    const Dtype* prob_input_data = input->cpu_data() + input->offset(n);
 
     spatial_lattice_->compute(spatial_out_data, prob_input_data, channels_, false);
 
@@ -173,18 +198,18 @@ void BilateralInterface<Dtype>::Forward_cpu() {
     }
   }
 
-  caffe_set(count_, Dtype(0.), output_->mutable_cpu_data());
+  caffe_set(count_, Dtype(0.), output->mutable_cpu_data());
 
   for (int n = 0; n < num_; ++n) {
     caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, channels_, num_pixels_, channels_, (Dtype) 1.,
-        wspatial_->cpu_data(), spatial_out_blob_.cpu_data() + spatial_out_blob_.offset(n), (Dtype) 0.,
-        output_->mutable_cpu_data() + output_->offset(n));
+        wspatial->cpu_data(), spatial_out_blob_.cpu_data() + spatial_out_blob_.offset(n), (Dtype) 0.,
+        output->mutable_cpu_data() + output->offset(n));
   }
 
   for (int n = 0; n < num_; ++n) {
     caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, channels_, num_pixels_, channels_, (Dtype) 1.,
-        wbilateral_->cpu_data(), bilateral_out_blob_.cpu_data() + bilateral_out_blob_.offset(n), (Dtype) 1.,
-        output_->mutable_cpu_data() + output_->offset(n));
+        wbilateral->cpu_data(), bilateral_out_blob_.cpu_data() + bilateral_out_blob_.offset(n), (Dtype) 1.,
+        output->mutable_cpu_data() + output->offset(n));
   }
 
   //--------------------------- Compatibility multiplication ----------------
@@ -192,7 +217,7 @@ void BilateralInterface<Dtype>::Forward_cpu() {
   /*for (int n = 0; n < num_; ++n) {
     caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, channels_, num_pixels_,
         channels_, (Dtype) 1., this->blobs_[2]->cpu_data(),
-        output_->cpu_data() + output_->offset(n), (Dtype) 0.,
+        output->cpu_data() + output->offset(n), (Dtype) 0.,
         pairwise_.mutable_cpu_data() + pairwise_.offset(n));
   }*/
   //------------------------- Adding unaries, normalization is left to the next iteration --------------
@@ -215,7 +240,7 @@ void BilateralInterface<Dtype>::Backward_cpu() {
   for (int n = 0; n < num_; ++n) {
     caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasTrans, channels_, channels_,
                           num_pixels_, (Dtype) 1., pairwise_.cpu_diff() + pairwise_.offset(n),
-                          output_->cpu_data() + output_->offset(n), (Dtype) 1.,
+                          output->cpu_data() + output->offset(n), (Dtype) 1.,
                           this->blobs_[2]->mutable_cpu_diff());
   }
   //-------------------------- Gradient after compatibility transform--- -----
@@ -223,56 +248,56 @@ void BilateralInterface<Dtype>::Backward_cpu() {
     caffe_cpu_gemm<Dtype>(CblasTrans, CblasNoTrans, channels_, num_pixels_,
                           channels_, (Dtype) 1., this->blobs_[2]->cpu_data(),
                           pairwise_.cpu_diff() + pairwise_.offset(n), (Dtype) 0.,
-                          output_->mutable_cpu_diff() + output_->offset(n));
+                          output->mutable_cpu_diff() + output->offset(n));
   }*/
 
   // ------------------------- Gradient w.r.t. kernels weights ------------
-  caffe_set(wspatial_->count(), Dtype(0.), wspatial_->mutable_cpu_diff());
-  caffe_set(wbilateral_->count(), Dtype(0.), wbilateral_->mutable_cpu_diff());
+  caffe_set(wspatial->count(), Dtype(0.), wspatial->mutable_cpu_diff());
+  caffe_set(wbilateral->count(), Dtype(0.), wbilateral->mutable_cpu_diff());
 
   for (int n = 0; n < num_; ++n) {
     caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasTrans, channels_, channels_,
-                          num_pixels_, (Dtype) 1., output_->cpu_diff() + output_->offset(n),
+                          num_pixels_, (Dtype) 1., output->cpu_diff() + output->offset(n),
                           spatial_out_blob_.cpu_data() + spatial_out_blob_.offset(n), (Dtype) 1.,
-                          wspatial_->mutable_cpu_diff());
+                          wspatial->mutable_cpu_diff());
   }
 
   for (int n = 0; n < num_; ++n) {
     caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasTrans, channels_, channels_,
-                          num_pixels_, (Dtype) 1., output_->cpu_diff() + output_->offset(n),
+                          num_pixels_, (Dtype) 1., output->cpu_diff() + output->offset(n),
                           bilateral_out_blob_.cpu_data() + bilateral_out_blob_.offset(n), (Dtype) 1.,
-                          wbilateral_->mutable_cpu_diff());
+                          wbilateral->mutable_cpu_diff());
   }
 
   /*Dtype* tmp = new Dtype[count_];
-  caffe_mul<Dtype>(count_, output_->cpu_diff(), spatial_out_blob_.cpu_data(), tmp);
+  caffe_mul<Dtype>(count_, output->cpu_diff(), spatial_out_blob_.cpu_data(), tmp);
   for (int c = 0; c < count_; ++c) {
-    (wspatial_->mutable_cpu_diff())[0] += tmp[c];
+    (wspatial->mutable_cpu_diff())[0] += tmp[c];
   }
-  caffe_mul<Dtype>(count_, output_->cpu_diff(), bilateral_out_blob_.cpu_data(), tmp);
+  caffe_mul<Dtype>(count_, output->cpu_diff(), bilateral_out_blob_.cpu_data(), tmp);
   for (int c = 0; c < count_; ++c) {
-    (wbilateral_->mutable_cpu_diff())[0] += tmp[c];
+    (wbilateral->mutable_cpu_diff())[0] += tmp[c];
   }
   delete[] tmp;*/
 
   // TODO: Check whether there's a way to improve the accuracy of this calculation.
   for (int n = 0; n < num_; ++n) {
     caffe_cpu_gemm<Dtype>(CblasTrans, CblasNoTrans, channels_, num_pixels_, channels_, (Dtype) 1.,
-                          wspatial_->cpu_data(), output_->cpu_diff() + output_->offset(n),
+                          wspatial->cpu_data(), output->cpu_diff() + output->offset(n),
                           (Dtype) 0.,
                           spatial_out_blob_.mutable_cpu_diff() + spatial_out_blob_.offset(n));
   }
-  //caffe_cpu_scale<Dtype>(count_, (wspatial_->cpu_data())[0],
-  //    output_->cpu_diff(), spatial_out_blob_.mutable_cpu_diff());
+  //caffe_cpu_scale<Dtype>(count_, (wspatial->cpu_data())[0],
+  //    output->cpu_diff(), spatial_out_blob_.mutable_cpu_diff());
 
   for (int n = 0; n < num_; ++n) {
     caffe_cpu_gemm<Dtype>(CblasTrans, CblasNoTrans, channels_, num_pixels_, channels_, (Dtype) 1.,
-                          wbilateral_->cpu_data(), output_->cpu_diff() + output_->offset(n),
+                          wbilateral->cpu_data(), output->cpu_diff() + output->offset(n),
                           (Dtype) 0.,
                           bilateral_out_blob_.mutable_cpu_diff() + bilateral_out_blob_.offset(n));
   }
-  //caffe_cpu_scale<Dtype>(count_, (wbilateral_->cpu_data())[0],
-  //    output_->cpu_diff(), bilateral_out_blob_.mutable_cpu_diff());
+  //caffe_cpu_scale<Dtype>(count_, (wbilateral->cpu_data())[0],
+  //    output->cpu_diff(), bilateral_out_blob_.mutable_cpu_diff());
 
 
   //---------------------------- BP thru normalization --------------------------
@@ -296,11 +321,11 @@ void BilateralInterface<Dtype>::Backward_cpu() {
   //--------------------------- Gradient for message passing ---------------
   for (int n = 0; n < num_; ++n) {
 
-    spatial_lattice_->compute(input_->mutable_cpu_diff() + input_->offset(n),
+    spatial_lattice_->compute(input->mutable_cpu_diff() + input->offset(n),
                               spatial_out_blob_.cpu_diff() + spatial_out_blob_.offset(n), channels_,
                               true, false);
 
-    bilateral_lattices_[n]->compute(input_->mutable_cpu_diff() + input_->offset(n),
+    bilateral_lattices_[n]->compute(input->mutable_cpu_diff() + input->offset(n),
                                        bilateral_out_blob_.cpu_diff() + bilateral_out_blob_.offset(n),
                                        channels_, true, true);
   }
@@ -366,7 +391,7 @@ void BilateralInterface<Dtype>::compute_spatial_kernel(float* const output_kerne
 
 
 /*	Compile certain expected uses of BilateralInterface.
-	Will cause compiliation errors ("undefined reference") if you use another type not defined here.
+	Will cause linker errors ("undefined reference") if you use another type not defined here.
 */
 template class BilateralInterface<float>;
 template class BilateralInterface<double>;

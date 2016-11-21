@@ -22,18 +22,29 @@ class BilateralInterface {
    * Must be invoked only once after the construction of the layer.
    */
   void OneTimeSetUp(
+      const TensorShape & input,
+      const TensorShape & featswrt,
+      const TensorShape & wspatial,
+      const TensorShape & wbilateral,
+      float stdv_spatial_space,
+      float stdv_bilateral_space);
+  void OneTimeSetUp(
       Blob<Dtype>* const input,
       Blob<Dtype>* const featswrt,
       Blob<Dtype>* const wspatial,
       Blob<Dtype>* const wbilateral,
-      Blob<Dtype>* const output,
       float stdv_spatial_space,
       float stdv_bilateral_space);
 
   /**
    * Forward pass - to be called during inference.
    */
-  virtual void Forward_cpu();
+  virtual void Forward_cpu(
+                Blob<Dtype>* const input,
+                Blob<Dtype>* const featswrt,
+                Blob<Dtype>* const wspatial,
+                Blob<Dtype>* const wbilateral,
+                Blob<Dtype>* const output);
 //#ifndef CPU_ONLY
 //  virtual void Forward_gpu();
 //#endif
@@ -46,21 +57,17 @@ class BilateralInterface {
 //  virtual void Backward_gpu();
 //#endif
 
-  virtual void compute_spatial_kernel(float* const output_kernel);
-  virtual void compute_bilateral_kernel(const Blob<Dtype>* const rgb_blob, const int n, float* const output_kernel);
+  void compute_spatial_kernel(float* const output_kernel);
+  void compute_bilateral_kernel(const Blob<Dtype>* const rgb_blob, const int n, float* const output_kernel);
 
-  BilateralInterface() : init_cpu(false), init_gpu(false),
-                          norm_feed_(nullptr),
-                          bilateral_kernel_buffer_(nullptr),
-                          input_(nullptr),
-                          featswrt_(nullptr),
-                          wspatial_(nullptr),
-                          wbilateral_(nullptr),
-                          output_(nullptr) {}
+  explicit BilateralInterface() : init_cpu(false), init_gpu(false),
+                                  norm_feed_(nullptr),
+                                  bilateral_kernel_buffer_(nullptr) {}
   ~BilateralInterface() {freebilateralbuffer();}
 
  protected:
-   void freebilateralbuffer();
+  void OneTimeSetUp_KnownShapes();
+  void freebilateralbuffer();
 
   // filter radii
   float theta_alpha_; // spatial part of bilateral
@@ -92,13 +99,6 @@ class BilateralInterface {
 
   Blob<Dtype> spatial_norm_;
   Blob<Dtype> bilateral_norms_;
-
-  // saved inputs when setting up
-  Blob<Dtype>* input_;
-  Blob<Dtype>* featswrt_;
-  Blob<Dtype>* wspatial_;
-  Blob<Dtype>* wbilateral_;
-  Blob<Dtype>* output_;
 };
 
 } //namespace

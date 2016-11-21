@@ -7,19 +7,30 @@ template <typename Dtype>
 class Blob {
 public:
     Blob() : fromTFtensor(false), buf_(nullptr) {}
-    Blob(const tensorflow::Tensor & input) {DataFrom(input);}
-    Blob(int batch, int chans, int rows, int cols) {cpu_alloc(batch, chans, rows, cols);}
+    Blob(const tensorflow::TensorShape & input)    : fromTFtensor(false), buf_(nullptr) {ShapeFrom(input);}
+    Blob(const tensorflow::Tensor & input)         : fromTFtensor(false), buf_(nullptr) {DataFrom(input);}
+    Blob(tensorflow::Tensor * input)               : fromTFtensor(false), buf_(nullptr) {DataFrom(*input);}
+    Blob(int batch, int chans, int rows, int cols) : fromTFtensor(false), buf_(nullptr) {cpu_alloc(batch, chans, rows, cols);}
+
     void DataFrom(const tensorflow::Tensor & input) {
+        CHECK(fromTFtensor == false && buf_ == nullptr) <<
+                "cant DataFrom() when Blob is already attached to a tf::Tensor!";
         fromTFtensor = true;
         shape_ = input.shape();
         buf_ = (Dtype*)input.tensor_data().data();
-        CHECK_EQ(num_axes(), 4) << "input must be 4-tensor!";
         ResetShapes();
+        CHECK_EQ(num_axes(), 4) << "input must be 4-tensor!";
+    }
+    void ShapeFrom(const tensorflow::TensorShape & input) {
+        CHECK(fromTFtensor == false && buf_ == nullptr) <<
+                "cant ShapeFrom() when Blob is already attached to a tf::Tensor!";
+        shape_ = input;
+        ResetShapes();
+        CHECK_EQ(num_axes(), 4) << "input must be 4-tensor!";
     }
     void cpu_alloc(int batch, int chans, int rows, int cols) {
         CHECK(fromTFtensor == false && buf_ == nullptr) <<
                 "cant cpu_alloc() when Blob is already attached to a tf::Tensor!";
-        fromTFtensor = false;
         shape_ = tensorflow::TensorShape({batch, chans, rows, cols});
         buf_ = new Dtype[shape_.num_elements()];
         ResetShapes();

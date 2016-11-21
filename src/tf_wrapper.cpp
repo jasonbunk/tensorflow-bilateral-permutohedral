@@ -15,6 +15,63 @@ typedef Eigen::GpuDevice GPUDevice;
 
 namespace tensorflow {
 
+
+template <typename Device, typename T>
+struct LaunchBilateralFilters;
+
+
+template <typename T>
+struct LaunchBilateralFilters<CPUDevice, T> {
+    LaunchBilateralFilters(float stdv_spatial_space, float stdv_bilater_space,
+                        const TensorShape & blob_input_shape,
+                        const TensorShape & blob_ftwrt_shape,
+                        const TensorShape & blob_wspat_shape,
+                        const TensorShape & blob_wbila_shape) {
+        // setup filterer
+        filterer.OneTimeSetUp(blob_input_shape,
+                              blob_ftwrt_shape,
+                              blob_wspat_shape,
+                              blob_wbila_shape,
+                              stdv_spatial_space,
+                              stdv_bilater_space);
+    }
+
+    void launch(OpKernelContext* context,
+                    const Tensor& input,
+                    const Tensor& ftwrt,
+                    const Tensor& wspat,
+                    const Tensor& wbila,
+                    Tensor* output) {
+        // inputs
+        Blob<T> blob_input(input);
+        Blob<T> blob_ftwrt(ftwrt);
+        Blob<T> blob_wspat(wspat);
+        Blob<T> blob_wbila(wbila);
+        // output
+        Blob<T> blob_ouput(*output);
+
+        printf("CPU: blob_input.shape: %s\n",blob_input.tfshape().DebugString().c_str());
+        printf("CPU: blob_ftwrt.shape: %s\n",blob_ftwrt.tfshape().DebugString().c_str());
+        printf("CPU: blob_wspat.shape: %s\n",blob_wspat.tfshape().DebugString().c_str());
+        printf("CPU: blob_wbila.shape: %s\n",blob_wbila.tfshape().DebugString().c_str());
+
+        filterer.Forward_cpu(&blob_input,
+                             &blob_ftwrt,
+                             &blob_wspat,
+                             &blob_wbila,
+                             &blob_ouput);
+    }
+
+    BilateralInterface<T> filterer;
+    float stdv_spatial_space, stdv_bilater_space;
+};
+
+
+//template <typename T>
+//struct LaunchBilateralFilters<GPUDevice, T> {
+//};
+
+
 template<typename Device, typename T>
 class BilateralFiltersOp: public OpKernel {
 public:
@@ -32,56 +89,47 @@ public:
 
     void Compute(OpKernelContext* context) override {
         // inputs
-        Blob<T> blob_input(context->input(0));
-        Blob<T> blob_ftwrt(context->input(1));
-        Blob<T> blob_wspat(context->input(2));
-        Blob<T> blob_wbila(context->input(3));
-
-        printf("Compute: blob_input.shape: %s\n",blob_input.tfshape().DebugString().c_str());
-        printf("Compute: blob_ftwrt.shape: %s\n",blob_ftwrt.tfshape().DebugString().c_str());
-        printf("Compute: blob_wspat.shape: %s\n",blob_wspat.tfshape().DebugString().c_str());
-        printf("Compute: blob_wbila.shape: %s\n",blob_wbila.tfshape().DebugString().c_str());
-
+        const Tensor& input = context->input(0);
+        const Tensor& ftwrt = context->input(1);
+        const Tensor& wspat = context->input(2);
+        const Tensor& wbila = context->input(3);
         // output
         Tensor* output = nullptr;
         OP_REQUIRES_OK(context,
-                context->allocate_output(0, blob_input.tfshape(), &output));
-        Blob<T> blob_ouput(*output);
+                context->allocate_output(0, input.shape(), &output));
 
         // check 4 dimensional inputs
         auto err0 = errors::InvalidArgument("shape must be 4-dimensional");
-        OP_REQUIRES(context, blob_input.tfshape().dims() == 4, err0);
-        OP_REQUIRES(context, blob_ftwrt.tfshape().dims() == 4, err0);
-        OP_REQUIRES(context, blob_wspat.tfshape().dims() == 4, err0);
-        OP_REQUIRES(context, blob_wbila.tfshape().dims() == 4, err0);
+        OP_REQUIRES(context, input.shape().dims() == 4, err0);
+        OP_REQUIRES(context, ftwrt.shape().dims() == 4, err0);
+        OP_REQUIRES(context, wspat.shape().dims() == 4, err0);
+        OP_REQUIRES(context, wbila.shape().dims() == 4, err0);
 
         // input and featswrt must have same minibatch count and spatial dims
         auto err1 = errors::InvalidArgument("input and featswrt must have same minibatch count and spatial dims");
-        OP_REQUIRES(context, blob_input.tfshape().dim_size(0) == blob_ftwrt.tfshape().dim_size(0), err1);
-        OP_REQUIRES(context, blob_input.tfshape().dim_size(2) == blob_ftwrt.tfshape().dim_size(2), err1);
-        OP_REQUIRES(context, blob_input.tfshape().dim_size(3) == blob_ftwrt.tfshape().dim_size(3), err1);
+        OP_REQUIRES(context, input.shape().dim_size(0) == ftwrt.shape().dim_size(0), err1);
+        OP_REQUIRES(context, input.shape().dim_size(2) == ftwrt.shape().dim_size(2), err1);
+        OP_REQUIRES(context, input.shape().dim_size(3) == ftwrt.shape().dim_size(3), err1);
 
         // filter coefficients must be of shape [1, 1, input_chans, input_chans]
         auto err2 = errors::InvalidArgument("filter coefficients must be of shape [1, 1, input_chans, input_chans]");
-        OP_REQUIRES(context, blob_wspat.tfshape().dim_size(0) == 1, err2);
-        OP_REQUIRES(context, blob_wspat.tfshape().dim_size(1) == 1, err2);
-        OP_REQUIRES(context, blob_wspat.tfshape().dim_size(2) == blob_input.tfshape().dim_size(1), err2);
-        OP_REQUIRES(context, blob_wspat.tfshape().dim_size(3) == blob_input.tfshape().dim_size(1), err2);
+        OP_REQUIRES(context, wspat.shape().dim_size(0) == 1, err2);
+        OP_REQUIRES(context, wspat.shape().dim_size(1) == 1, err2);
+        OP_REQUIRES(context, wspat.shape().dim_size(2) == input.shape().dim_size(1), err2);
+        OP_REQUIRES(context, wspat.shape().dim_size(3) == input.shape().dim_size(1), err2);
 
-        OP_REQUIRES(context, blob_wbila.tfshape().dim_size(0) == 1, err2);
-        OP_REQUIRES(context, blob_wbila.tfshape().dim_size(1) == 1, err2);
-        OP_REQUIRES(context, blob_wbila.tfshape().dim_size(2) == blob_input.tfshape().dim_size(1), err2);
-        OP_REQUIRES(context, blob_wbila.tfshape().dim_size(3) == blob_input.tfshape().dim_size(1), err2);
+        OP_REQUIRES(context, wbila.shape().dim_size(0) == 1, err2);
+        OP_REQUIRES(context, wbila.shape().dim_size(1) == 1, err2);
+        OP_REQUIRES(context, wbila.shape().dim_size(2) == input.shape().dim_size(1), err2);
+        OP_REQUIRES(context, wbila.shape().dim_size(3) == input.shape().dim_size(1), err2);
 
-        BilateralInterface<T> filterer;
-        filterer.OneTimeSetUp(&blob_input,
-                              &blob_ftwrt,
-                              &blob_wspat,
-                              &blob_wbila,
-                              &blob_ouput,
-                              stdv_spatial_space,
-                              stdv_bilater_space);
-        filterer.Forward_cpu();
+        LaunchBilateralFilters<Device,T> launcher(stdv_spatial_space,
+                                                  stdv_bilater_space,
+                                                  input.shape(),
+                                                  ftwrt.shape(),
+                                                  wspat.shape(),
+                                                  wbila.shape());
+        launcher.launch(context, input, ftwrt, wspat, wbila, output);
     }
 
     float stdv_spatial_space, stdv_bilater_space;
