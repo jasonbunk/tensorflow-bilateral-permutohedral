@@ -255,7 +255,7 @@ Copies all input values to the output
       }
       shape_inference::ShapeHandle inputs_01;
       shape_inference::ShapeHandle output;
-      for (size_t i = 0; i < 2; ++i) {
+      for (size_t i = 0; i < 1; ++i) {
           TF_RETURN_IF_ERROR(c->WithRank(c->input(i), 4, &inputs_01));
           TF_RETURN_IF_ERROR(c->Merge(output, inputs_01, &output));
       }
