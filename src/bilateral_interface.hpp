@@ -11,8 +11,6 @@ using std::vector;
 #include "util/blob.hpp"
 #include "util/modified_permutohedral.hpp"
 
-namespace tensorflow {
-
 
 template <typename Dtype>
 class BilateralInterface {
@@ -21,13 +19,6 @@ class BilateralInterface {
   /**
    * Must be invoked only once after the construction of the layer.
    */
-  void OneTimeSetUp(
-      const TensorShape & input,
-      const TensorShape & featswrt,
-      const TensorShape & wspatial,
-      const TensorShape & wbilateral,
-      float stdv_spatial_space,
-      float stdv_bilateral_space);
   void OneTimeSetUp(
       Blob<Dtype>* const input,
       Blob<Dtype>* const featswrt,
@@ -39,22 +30,27 @@ class BilateralInterface {
   /**
    * Forward pass - to be called during inference.
    */
-  virtual void Forward_cpu(
+  void Forward_cpu(
                 Blob<Dtype>* const input,
                 Blob<Dtype>* const featswrt,
                 Blob<Dtype>* const wspatial,
                 Blob<Dtype>* const wbilateral,
                 Blob<Dtype>* const output);
-//#ifndef CPU_ONLY
-//  virtual void Forward_gpu();
-//#endif
+#ifndef CPU_ONLY
+  void Forward_gpu(
+                Blob<Dtype>* const input,
+                Blob<Dtype>* const featswrt,
+                Blob<Dtype>* const wspatial,
+                Blob<Dtype>* const wbilateral,
+                Blob<Dtype>* const output);
+#endif
 
   /**
    * Backward pass - to be called during training.
    */
-  virtual void Backward_cpu();
+  void Backward_cpu();
 //#ifndef CPU_ONLY
-//  virtual void Backward_gpu();
+//  void Backward_gpu();
 //#endif
 
   void compute_spatial_kernel(float* const output_kernel);
@@ -68,6 +64,7 @@ class BilateralInterface {
  protected:
   void OneTimeSetUp_KnownShapes();
   void freebilateralbuffer();
+  void gpu_setup_normalize_spatial_norms(Dtype* norm_data);
 
   // filter radii
   float theta_alpha_; // spatial part of bilateral
@@ -101,6 +98,5 @@ class BilateralInterface {
   Blob<Dtype> bilateral_norms_;
 };
 
-} //namespace
 
 #endif

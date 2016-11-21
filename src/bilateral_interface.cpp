@@ -18,9 +18,9 @@
 
 #include "bilateral_interface.hpp"
 #include "util/math_functions.hpp"
+#include "util/check_macros.hpp"
 using namespace caffe;
 
-namespace tensorflow {
 
 /**
  * To be invoked once only immediately after construction.
@@ -33,25 +33,6 @@ void BilateralInterface<Dtype>::OneTimeSetUp(
     Blob<Dtype>* const wbilateral,
     float stdv_spatial_space,
     float stdv_bilateral_space) {
-  OneTimeSetUp(input->tfshape(),
-               featswrt->tfshape(),
-               wspatial->tfshape(),
-               wbilateral->tfshape(),
-               stdv_spatial_space,
-               stdv_bilateral_space);
-}
-
-/**
- * To be invoked once only immediately after construction.
- */
-template <typename Dtype>
-void BilateralInterface<Dtype>::OneTimeSetUp(
-    const TensorShape & input,
-    const TensorShape & featswrt,
-    const TensorShape & wspatial,
-    const TensorShape & wbilateral,
-    float stdv_spatial_space,
-    float stdv_bilateral_space) {
 
   if(init_cpu != false || init_gpu != false) {
       bool good = true;
@@ -60,13 +41,13 @@ void BilateralInterface<Dtype>::OneTimeSetUp(
       good = good && (theta_gamma_ == stdv_spatial_space);
 
       // save shapes
-      good = good && (count_ == input.num_elements());
-      good = good && (num_ == input.dim_size(0));
-      good = good && (channels_ == input.dim_size(1));
-      good = good && (height_ == input.dim_size(2));
-      good = good && (width_ == input.dim_size(3));
+      good = good && (count_ == input->count());
+      good = good && (num_ == input->shape(0));
+      good = good && (channels_ == input->shape(1));
+      good = good && (height_ == input->shape(2));
+      good = good && (width_ == input->shape(3));
       good = good && (num_pixels_ == height_ * width_);
-      good = good && (wrt_chans_ == 2 + featswrt.dim_size(1));
+      good = good && (wrt_chans_ == 2 + featswrt->shape(1));
       if(good) return;
       else {
         freebilateralbuffer();
@@ -80,23 +61,23 @@ void BilateralInterface<Dtype>::OneTimeSetUp(
   theta_gamma_ = stdv_spatial_space;
 
   // save shapes
-  count_ = input.num_elements();
-  num_ = input.dim_size(0);
-  channels_ = input.dim_size(1);
-  height_ = input.dim_size(2);
-  width_ = input.dim_size(3);
+  count_ = input->count();
+  num_ = input->shape(0);
+  channels_ = input->shape(1);
+  height_ = input->shape(2);
+  width_ = input->shape(3);
   num_pixels_ = height_ * width_;
-  wrt_chans_ = 2 + featswrt.dim_size(1);
+  wrt_chans_ = 2 + featswrt->shape(1);
 
   // check shapes
-  CHECK(num_ == featswrt.dim_size(0) && height_ == featswrt.dim_size(2) && width_ == featswrt.dim_size(3))
+  CHECK(num_ == featswrt->shape(0) && height_ == featswrt->shape(2) && width_ == featswrt->shape(3))
       << "input and featswrt must have same number in minibatch and same spatial dimensions!";
-  CHECK(channels_ == wspatial.dim_size(2) && channels_ == wspatial.dim_size(3))
+  CHECK(channels_ == wspatial->shape(2) && channels_ == wspatial->shape(3))
       << "input and wspatial must have same num channels! "
-      <<channels_<<" != "<<wspatial.dim_size(2)<<" or "<<wspatial.dim_size(3);
-  CHECK(channels_ == wbilateral.dim_size(2) && channels_ == wbilateral.dim_size(3))
+      <<channels_<<" != "<<wspatial->shape(2)<<" or "<<wspatial->shape(3);
+  CHECK(channels_ == wbilateral->shape(2) && channels_ == wbilateral->shape(3))
       << "input and wbilateral must have same num channels! "
-      <<channels_<<" != "<<wbilateral.dim_size(2)<<" or "<<wbilateral.dim_size(3);
+      <<channels_<<" != "<<wbilateral->shape(2)<<" or "<<wbilateral->shape(3);
 
   OneTimeSetUp_KnownShapes();
 }
@@ -121,8 +102,8 @@ void BilateralInterface<Dtype>::OneTimeSetUp_KnownShapes() {
   freebilateralbuffer();
 
   spatial_norm_.Reshape(1, 1, height_, width_);
-  Dtype* norm_data_gpu ;
-  Dtype*  norm_data;
+  Dtype* norm_data_gpu = nullptr;
+  Dtype* norm_data = nullptr;
   // Initialize the spatial lattice. This does not need to be computed for every image because we use a fixed size.
   switch (Caffe::mode()) {
     case Caffe::CPU:
@@ -131,32 +112,31 @@ void BilateralInterface<Dtype>::OneTimeSetUp_KnownShapes() {
       // Calculate spatial filter normalization factors.
       norm_feed_= new Dtype[num_pixels_];
       caffe_set(num_pixels_, Dtype(1.0), norm_feed_);
-      // pass norm_feed and norm_data to gpu
       spatial_lattice_->compute(norm_data, norm_feed_, 1);
+      for (int i = 0; i < num_pixels_; ++i) {
+        norm_data[i] = 1.0f / (norm_data[i] + 1e-20f);
+      }
       bilateral_kernel_buffer_ = new float[wrt_chans_ * num_pixels_];
       init_cpu = true;
       break;
     #ifndef CPU_ONLY
     case Caffe::GPU:
-      CUDA_CHECK(cudaMalloc((void**)&spatial_kernel_gpu_, 2*num_pixels_ * sizeof(float))) ;
-      CUDA_CHECK(cudaMemcpy(spatial_kernel_gpu_, spatial_kernel, 2*num_pixels_ * sizeof(float), cudaMemcpyHostToDevice)) ;
+      CUDA_CHECK(cudaMalloc((void**)&spatial_kernel_gpu_, 2*num_pixels_ * sizeof(float)));
+      CUDA_CHECK(cudaMemcpy(spatial_kernel_gpu_, spatial_kernel, 2*num_pixels_ * sizeof(float), cudaMemcpyHostToDevice));
       spatial_lattice_->init(spatial_kernel_gpu_, 2, width_, height_);
-      CUDA_CHECK(cudaMalloc((void**)&norm_feed_, num_pixels_ * sizeof(Dtype))) ;
+      CUDA_CHECK(cudaMalloc((void**)&norm_feed_, num_pixels_ * sizeof(Dtype)));
       caffe_gpu_set(num_pixels_, Dtype(1.0), norm_feed_);
       norm_data_gpu = spatial_norm_.mutable_gpu_data();
       spatial_lattice_->compute(norm_data_gpu, norm_feed_, 1);
       norm_data = spatial_norm_.mutable_cpu_data();
-      CUDA_CHECK(cudaMalloc((void**)&bilateral_kernel_buffer_, wrt_chans_ * num_pixels_ * sizeof(float))) ;
+      gpu_setup_normalize_spatial_norms(norm_data);
+      CUDA_CHECK(cudaMalloc((void**)&bilateral_kernel_buffer_, wrt_chans_ * num_pixels_ * sizeof(float)));
       CUDA_CHECK(cudaFree(spatial_kernel_gpu_));
       init_gpu = true;
       break;
     #endif
     default:
     LOG(FATAL) << "Unknown caffe mode.";
-  }
-
-  for (int i = 0; i < num_pixels_; ++i) {
-    norm_data[i] = 1.0f / (norm_data[i] + 1e-20f);
   }
 
   // Allocate space for bilateral kernels. This is a temporary buffer used to compute bilateral lattices later.
@@ -417,6 +397,3 @@ void BilateralInterface<Dtype>::compute_spatial_kernel(float* const output_kerne
 */
 template class BilateralInterface<float>;
 template class BilateralInterface<double>;
-
-
-}  // namespace caffe

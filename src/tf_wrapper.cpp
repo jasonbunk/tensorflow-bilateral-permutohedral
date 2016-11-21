@@ -12,6 +12,7 @@
 typedef Eigen::ThreadPoolDevice CPUDevice;
 typedef Eigen::GpuDevice GPUDevice;
 
+#include "util/common.hpp" // GPU/CPU modes
 #include "bilateral_interface.hpp"
 
 namespace tensorflow {
@@ -29,14 +30,19 @@ struct LaunchBilateralFilters<CPUDevice, T> {
                         const TensorShape & blob_wspat_shape,
                         const TensorShape & blob_wbila_shape,
                         BilateralInterface<T> * newfilterer) : filterer(newfilterer) {
+        caffe::Caffe::set_mode(caffe::Caffe::CPU);
         CHECK(filterer != nullptr) << "filterer == nullptr!!";
+        Blob<T> blob_input(&blob_input_shape);
+        Blob<T> blob_ftwrt(&blob_ftwrt_shape);
+        Blob<T> blob_wspat(&blob_wspat_shape);
+        Blob<T> blob_wbila(&blob_wbila_shape);
         // setup filterer
-        filterer->OneTimeSetUp(blob_input_shape,
-                              blob_ftwrt_shape,
-                              blob_wspat_shape,
-                              blob_wbila_shape,
-                              stdv_spatial_space,
-                              stdv_bilater_space);
+        filterer->OneTimeSetUp(&blob_input,
+                               &blob_ftwrt,
+                               &blob_wspat,
+                               &blob_wbila,
+                               stdv_spatial_space,
+                               stdv_bilater_space);
     }
 
     void launch(OpKernelContext* context,
@@ -46,17 +52,12 @@ struct LaunchBilateralFilters<CPUDevice, T> {
                     const Tensor& wbila,
                     Tensor* output) {
         // inputs
-        Blob<T> blob_input(input);
-        Blob<T> blob_ftwrt(ftwrt);
-        Blob<T> blob_wspat(wspat);
-        Blob<T> blob_wbila(wbila);
+        Blob<T> blob_input(&input);
+        Blob<T> blob_ftwrt(&ftwrt);
+        Blob<T> blob_wspat(&wspat);
+        Blob<T> blob_wbila(&wbila);
         // output
-        Blob<T> blob_ouput(*output);
-
-        printf("CPU: blob_input.shape: %s\n",blob_input.tfshape().DebugString().c_str());
-        printf("CPU: blob_ftwrt.shape: %s\n",blob_ftwrt.tfshape().DebugString().c_str());
-        printf("CPU: blob_wspat.shape: %s\n",blob_wspat.tfshape().DebugString().c_str());
-        printf("CPU: blob_wbila.shape: %s\n",blob_wbila.tfshape().DebugString().c_str());
+        Blob<T> blob_ouput(output);
 
         CHECK(filterer != nullptr) << "filterer == nullptr!!";
         filterer->Forward_cpu(&blob_input,
@@ -73,9 +74,58 @@ private:
 };
 
 
-//template <typename T>
-//struct LaunchBilateralFilters<GPUDevice, T> {
-//};
+template <typename T>
+struct LaunchBilateralFilters<GPUDevice, T> {
+    LaunchBilateralFilters(float stdv_spatial_space, float stdv_bilater_space,
+                        const TensorShape & blob_input_shape,
+                        const TensorShape & blob_ftwrt_shape,
+                        const TensorShape & blob_wspat_shape,
+                        const TensorShape & blob_wbila_shape,
+                        BilateralInterface<T> * newfilterer) : filterer(newfilterer) {
+        caffe::Caffe::set_mode(caffe::Caffe::GPU);
+        CHECK(filterer != nullptr) << "filterer == nullptr!!";
+        Blob<T> blob_input(&blob_input_shape);
+        Blob<T> blob_ftwrt(&blob_ftwrt_shape);
+        Blob<T> blob_wspat(&blob_wspat_shape);
+        Blob<T> blob_wbila(&blob_wbila_shape);
+        // setup filterer
+        filterer->OneTimeSetUp(&blob_input,
+                               &blob_ftwrt,
+                               &blob_wspat,
+                               &blob_wbila,
+                               stdv_spatial_space,
+                               stdv_bilater_space);
+        std::cout<<"LaunchBilateralFilters(): done!!"<<std::endl;
+    }
+
+    void launch(OpKernelContext* context,
+                    const Tensor& input,
+                    const Tensor& ftwrt,
+                    const Tensor& wspat,
+                    const Tensor& wbila,
+                    Tensor* output) {
+        // inputs
+        Blob<T> blob_input(&input);
+        Blob<T> blob_ftwrt(&ftwrt);
+        Blob<T> blob_wspat(&wspat);
+        Blob<T> blob_wbila(&wbila);
+        // output
+        Blob<T> blob_ouput(output);
+
+        CHECK(filterer != nullptr) << "filterer == nullptr!!";
+
+        filterer->Forward_gpu(&blob_input,
+                             &blob_ftwrt,
+                             &blob_wspat,
+                             &blob_wbila,
+                             &blob_ouput);
+    }
+
+    BilateralInterface<T> * filterer;
+    float stdv_spatial_space, stdv_bilater_space;
+private:
+    LaunchBilateralFilters() : filterer(nullptr) {std::cout<<"@@@@@@@@@@@@@@@@@@@@@@@@ LaunchBilateralFilters() private constructor"<<std::endl;}
+};
 
 
 template<typename Device, typename T>
@@ -257,20 +307,29 @@ Status BilateralFiltersGrad(const AttrSlice& attrs, FunctionDef* g) {
 REGISTER_OP_GRADIENT("MaxPool", MaxPoolGrad);
 #endif
 
-#define REGISTER_MYBILATERALFILT_KERNELS(type)                                  \
-  REGISTER_KERNEL_BUILDER(                                                      \
-      Name("BilateralFilters").Device(DEVICE_CPU).TypeConstraint<type>("T"),    \
-      BilateralFiltersOp<Eigen::ThreadPoolDevice, type>);               /*      \
-  REGISTER_KERNEL_BUILDER(                                                      \
-      Name("BilateralFiltersGrad").Device(DEVICE_CPU).TypeConstraint<type>("T"),          \
-      BilateralFiltersGradOp<Eigen::ThreadPoolDevice, type>);                             /*  \
-  // REGISTER_KERNEL_BUILDER(                                                      \
-  //     Name("BilateralFilters").Device(DEVICE_GPU).TypeConstraint<type>("T"),              \
-  //     BilateralFiltersOp<Eigen::GpuDevice, type>);                                        \
-  // REGISTER_KERNEL_BUILDER(                                                      \
-  //     Name("BilateralFiltersGrad").Device(DEVICE_GPU).TypeConstraint<type>("T"),          \
-  //     BilateralFiltersGradOp<Eigen::GpuDevice, type>);*/
+#define REGISTER_MYBILATERALFILT_KERNELS(type)                                   \
+  REGISTER_KERNEL_BUILDER(                                                       \
+      Name("BilateralFilters").Device(DEVICE_CPU).TypeConstraint<type>("T"),     \
+      BilateralFiltersOp<CPUDevice, type>);                                      \
+  REGISTER_KERNEL_BUILDER(                                                       \
+      Name("BilateralFilters").Device(DEVICE_GPU).TypeConstraint<type>("T"),     \
+      BilateralFiltersOp<Eigen::GpuDevice, type>);
 
+#if 0
+#define REGISTER_MYBILATERALFILT_KERNELS(type)                                   \
+  REGISTER_KERNEL_BUILDER(                                                       \
+      Name("BilateralFilters").Device(DEVICE_CPU).TypeConstraint<type>("T"),     \
+      BilateralFiltersOp<Eigen::ThreadPoolDevice, type>);                        \
+  REGISTER_KERNEL_BUILDER(                                                       \
+      Name("BilateralFiltersGrad").Device(DEVICE_CPU).TypeConstraint<type>("T"), \
+      BilateralFiltersGradOp<Eigen::ThreadPoolDevice, type>);                    \
+  REGISTER_KERNEL_BUILDER(                                                       \
+      Name("BilateralFilters").Device(DEVICE_GPU).TypeConstraint<type>("T"),     \
+      BilateralFiltersOp<Eigen::GpuDevice, type>);                               \
+  REGISTER_KERNEL_BUILDER(                                                       \
+      Name("BilateralFiltersGrad").Device(DEVICE_GPU).TypeConstraint<type>("T"), \
+      BilateralFiltersGradOp<Eigen::GpuDevice, type>);
+#endif
 
 REGISTER_MYBILATERALFILT_KERNELS(float);
 //REGISTER_MYBILATERALFILT_KERNELS(double);

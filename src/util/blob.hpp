@@ -1,60 +1,47 @@
 #ifndef _BLOB_HPP____
 #define _BLOB_HPP____
 
-#include "tensorflow/core/framework/tensor.h"
+#include <vector>
+#include <iostream>
+#include <assert.h>
+
+// if no c++11
+#ifndef nullptr
+#define nullptr NULL
+#endif
+
+namespace tensorflow {
+class TensorShape;
+class Tensor;
+}
 
 template <typename Dtype>
 class Blob {
 public:
     Blob() : fromTFtensor(false), buf_(nullptr) {}
-    Blob(const tensorflow::TensorShape & input)    : fromTFtensor(false), buf_(nullptr) {ShapeFrom(input);}
-    Blob(const tensorflow::Tensor & input)         : fromTFtensor(false), buf_(nullptr) {DataFrom(input);}
-    Blob(tensorflow::Tensor * input)               : fromTFtensor(false), buf_(nullptr) {DataFrom(*input);}
-    Blob(int batch, int chans, int rows, int cols) : fromTFtensor(false), buf_(nullptr) {cpu_alloc(batch, chans, rows, cols);}
+    Blob(tensorflow::TensorShape const*const input)    : fromTFtensor(false), buf_(nullptr) {ShapeFrom(input);}
+    Blob(tensorflow::Tensor const*const input)         : fromTFtensor(false), buf_(nullptr) {DataFrom(input);}
+    Blob(int batch, int chans, int rows, int cols)     : fromTFtensor(false), buf_(nullptr) {alloc(batch, chans, rows, cols);}
 
-    void DataFrom(const tensorflow::Tensor & input) {
-        CHECK(fromTFtensor == false && buf_ == nullptr) <<
-                "cant DataFrom() when Blob is already attached to a tf::Tensor!";
-        fromTFtensor = true;
-        shape_ = input.shape();
-        buf_ = (Dtype*)input.tensor_data().data();
-        ResetShapes();
-        CHECK_EQ(num_axes(), 4) << "input must be 4-tensor!";
-    }
-    void ShapeFrom(const tensorflow::TensorShape & input) {
-        CHECK(fromTFtensor == false && buf_ == nullptr) <<
-                "cant ShapeFrom() when Blob is already attached to a tf::Tensor!";
-        shape_ = input;
-        ResetShapes();
-        CHECK_EQ(num_axes(), 4) << "input must be 4-tensor!";
-    }
-    void cpu_alloc(int batch, int chans, int rows, int cols) {
-        CHECK(fromTFtensor == false && buf_ == nullptr) <<
-                "cant cpu_alloc() when Blob is already attached to a tf::Tensor!";
-        shape_ = tensorflow::TensorShape({batch, chans, rows, cols});
-        buf_ = new Dtype[shape_.num_elements()];
-        ResetShapes();
-    }
-    ~Blob() {
-        if(fromTFtensor == false && buf_ != nullptr) {
-            delete[] buf_;
-            buf_ = nullptr;
-        }
-    }
+    void DataFrom(tensorflow::Tensor const*const input);
+    void ShapeFrom(tensorflow::TensorShape const*const input);
+    void alloc(int batch, int chans, int rows, int cols);
+    void free_data();
 
-    tensorflow::TensorShape & tfshape() {return shape_;}
+    ~Blob() {free_data();}
 
     // caffe-like interface
     inline int shape(int index) const {
-        return shape_.dim_size(index);
+        assert(index >= 0 && index < num_axes());
+        return shape_[index];
     }
-    inline int num_axes() const { return shape_.dims(); }
-    inline int count() const { return shape_.num_elements(); }
+    inline int num_axes() const { return (int)shape_.size(); }
+    inline int count() const { return count_; }
 
     inline int num() const { return shape(0); }
-    inline int channels() const { return shape(1); }
-    inline int height() const { return shape(2); }
-    inline int width() const { return shape(3); }
+    inline int channels() const { return shape_1; }
+    inline int height() const { return shape_2; }
+    inline int width() const { return shape_3; }
 
     // NCHW
     int offset(int n,int c,int h,int w) const { return ((n * shape_1 + c) * shape_2 + h) * shape_3 + w; }
@@ -70,35 +57,42 @@ public:
 */
 
     Dtype const*const cpu_data() const {return buf_;}
-    Dtype * mutable_cpu_data() {return buf_;}
+    Dtype * mutable_cpu_data()         {return buf_;}
 
-    Dtype const*const gpu_data() const {std::cout<<"ERROR: blob.gpu_data() might not be right"<<std::endl; assert(0); return buf_;}
-    Dtype * mutable_gpu_data()   {std::cout<<"ERROR: blob.gpu_data() might not be right"<<std::endl; assert(0); return buf_;}
+    Dtype const*const gpu_data() const {return buf_;}
+    Dtype * mutable_gpu_data()         {return buf_;}
 
     void Reshape(int batch, int chans, int rows, int cols) {
-        CHECK(fromTFtensor == false) << "cant Reshape() when Blob is already attached to a tf::Tensor!";
+        assert(fromTFtensor == false);
         if(buf_ == nullptr) {
-            cpu_alloc(batch, chans, rows, cols);
+            alloc(batch, chans, rows, cols);
         } else {
-            CHECK(batch*rows*cols*chans == count()) << "cant Reshape(), buffer already allocated to preset size";
+            assert(batch*rows*cols*chans == count());
         }
     }
 
 private:
+    void cpu_alloc(int batch, int chans, int rows, int cols);
+    void gpu_alloc(int batch, int chans, int rows, int cols);
     void ResetShapes() {
         shape_1 = shape(1);
         shape_2 = shape(2);
         shape_3 = shape(3);
         shape_23 = shape_2 * shape_3;
         shape_123 = shape_1 * shape_2 * shape_3;
+        count_ = 0;
+        for(int ii=0; ii<num_axes(); ++ii) {
+            count_ += shape(ii);
+        }
     }
     int shape_1;
     int shape_2;
     int shape_3;
     int shape_23;
     int shape_123;
+    int count_;
     bool fromTFtensor;
-    tensorflow::TensorShape shape_;
+    std::vector<int> shape_;
     Dtype* buf_; // not refcounted; it's assumed these come from a Tensor object
                  // which is already refcounted
 };
