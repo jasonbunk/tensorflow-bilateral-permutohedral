@@ -223,7 +223,7 @@ CXXFLAGS += -MMD -MP
 # C++11
 CXXFLAGS += -std=c++11
 # Tensorflow docs say to use this with GCC 5.0, else crash
-CXXFLAGS += -D_GLIBCXX_USE_CXX11_ABI=0
+# CXXFLAGS += -D_GLIBCXX_USE_CXX11_ABI=0
 
 # Complete build flags.
 COMMON_FLAGS += $(foreach includedir,$(INCLUDE_DIRS),-I$(includedir))

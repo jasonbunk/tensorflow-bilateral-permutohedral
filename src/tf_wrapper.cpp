@@ -7,6 +7,7 @@
 #include <boost/shared_array.hpp>
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/op_kernel.h"
+#include "tensorflow/core/framework/shape_inference.h"
 
 typedef Eigen::ThreadPoolDevice CPUDevice;
 typedef Eigen::GpuDevice GPUDevice;
@@ -26,9 +27,11 @@ struct LaunchBilateralFilters<CPUDevice, T> {
                         const TensorShape & blob_input_shape,
                         const TensorShape & blob_ftwrt_shape,
                         const TensorShape & blob_wspat_shape,
-                        const TensorShape & blob_wbila_shape) {
+                        const TensorShape & blob_wbila_shape,
+                        BilateralInterface<T> * newfilterer) : filterer(newfilterer) {
+        CHECK(filterer != nullptr) << "filterer == nullptr!!";
         // setup filterer
-        filterer.OneTimeSetUp(blob_input_shape,
+        filterer->OneTimeSetUp(blob_input_shape,
                               blob_ftwrt_shape,
                               blob_wspat_shape,
                               blob_wbila_shape,
@@ -55,15 +58,18 @@ struct LaunchBilateralFilters<CPUDevice, T> {
         printf("CPU: blob_wspat.shape: %s\n",blob_wspat.tfshape().DebugString().c_str());
         printf("CPU: blob_wbila.shape: %s\n",blob_wbila.tfshape().DebugString().c_str());
 
-        filterer.Forward_cpu(&blob_input,
+        CHECK(filterer != nullptr) << "filterer == nullptr!!";
+        filterer->Forward_cpu(&blob_input,
                              &blob_ftwrt,
                              &blob_wspat,
                              &blob_wbila,
                              &blob_ouput);
     }
 
-    BilateralInterface<T> filterer;
+    BilateralInterface<T> * filterer;
     float stdv_spatial_space, stdv_bilater_space;
+private:
+    LaunchBilateralFilters() : filterer(nullptr) {std::cout<<"@@@@@@@@@@@@@@@@@@@@@@@@ LaunchBilateralFilters() private constructor"<<std::endl;}
 };
 
 
@@ -128,11 +134,17 @@ public:
                                                   input.shape(),
                                                   ftwrt.shape(),
                                                   wspat.shape(),
-                                                  wbila.shape());
+                                                  wbila.shape(),
+                                                  &filterer);
         launcher.launch(context, input, ftwrt, wspat, wbila, output);
     }
 
+    BilateralInterface<T> filterer;
     float stdv_spatial_space, stdv_bilater_space;
+
+private:
+    BilateralFiltersOp()  {std::cout<<"@@@@@@@@@@@@@@@@@@@@@@@@ BilateralFiltersOp() private constructor"<<std::endl;}
+    ~BilateralFiltersOp() {std::cout<<"@@@@@@@@@@@@@@@@@@@@@@@@ BilateralFiltersOp() private destructor"<<std::endl;}
 };
 
 
@@ -185,7 +197,21 @@ REGISTER_OP("BilateralFilters")
 .Attr("T: realnumbertype")
 .Doc(R"doc(
 Copies all input values to the output
-)doc");
+)doc")
+.SetShapeFn([](shape_inference::InferenceContext* c) {
+      shape_inference::ShapeHandle inputs_all;
+      for (size_t i = 0; i < c->num_inputs(); ++i) {
+          TF_RETURN_IF_ERROR(c->WithRank(c->input(i), 4, &inputs_all));
+      }
+      shape_inference::ShapeHandle inputs_01;
+      shape_inference::ShapeHandle output;
+      for (size_t i = 0; i < 2; ++i) {
+          TF_RETURN_IF_ERROR(c->WithRank(c->input(i), 4, &inputs_01));
+          TF_RETURN_IF_ERROR(c->Merge(output, inputs_01, &output));
+      }
+      c->set_output(0, output);
+      return Status::OK();
+});
 
 #if 0
 REGISTER_OP("BilateralFiltersGrad")

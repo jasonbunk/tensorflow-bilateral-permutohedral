@@ -34,7 +34,7 @@ catfile = os.path.join(path2file,'cat.jpg')
 catim = cv2.imread(catfile,cv2.IMREAD_COLOR).astype(np.float32) / 255.0
 catim = catim.reshape([1,]+list(catim.shape))
 
-tfcatplaceholder = tf.placeholder(tf.float32, [None,None,None,None], name="tfcatplaceholder")
+tfcatplaceholder = tf.placeholder(tf.float32, [catim.shape[0],catim.shape[3],catim.shape[1],catim.shape[2]], name="tfcatplaceholder")
 
 npwspatial = np.expand_dims(np.expand_dims(np.eye(catim.shape[-1]),0),0).astype(np.float32)
 npwbilateral = npwspatial.copy()
@@ -64,8 +64,10 @@ copycat  = libtfgaussiancrf.bilateral_filters(tfcatplaceholder,
 
 print("constructed the filter!!!!!!!!!!!!!!!!!!!!!!")
 describe("catim",catim)
+describe("tfcatplaceholder",tfcatplaceholder)
 describe("tfwspatial",tfwspatial)
 describe("tfwbilateral",tfwbilateral)
+describe("PREINIT: copycat",copycat)
 print("\n")
 
 #---------------------------------------------------------------------
@@ -75,10 +77,17 @@ sess = tf.InteractiveSession()
 
 tf.initialize_all_variables().run()
 
+describe("BEF: copycat",copycat)
+print("BEF: copycat.get_shape(): "+str(copycat.get_shape()))
+
 npcopycat = NCHW_to_NHWC(copycat.eval({tfcatplaceholder: NHWC_to_NCHW(catim/totalscalenorm)}))
+npcopyca2 = NCHW_to_NHWC(copycat.eval({tfcatplaceholder: NHWC_to_NCHW(npcopycat/totalscalenorm)}))
+
+describe("AFT: copycat",copycat)
 
 describe("catim",catim)
 describe("npcopycat",npcopycat)
 cv2.imshow("catim",catim[0,...])
 cv2.imshow("npcopycat",npcopycat[0,...])
+cv2.imshow("npcopyca2",npcopyca2[0,...])
 cv2.waitKey(0)

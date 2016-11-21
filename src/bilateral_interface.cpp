@@ -53,6 +53,28 @@ void BilateralInterface<Dtype>::OneTimeSetUp(
     float stdv_spatial_space,
     float stdv_bilateral_space) {
 
+  if(init_cpu != false || init_gpu != false) {
+      bool good = true;
+      // filter standard deviations
+      good = good && (theta_alpha_ == stdv_bilateral_space);
+      good = good && (theta_gamma_ == stdv_spatial_space);
+
+      // save shapes
+      good = good && (count_ == input.num_elements());
+      good = good && (num_ == input.dim_size(0));
+      good = good && (channels_ == input.dim_size(1));
+      good = good && (height_ == input.dim_size(2));
+      good = good && (width_ == input.dim_size(3));
+      good = good && (num_pixels_ == height_ * width_);
+      good = good && (wrt_chans_ == 2 + featswrt.dim_size(1));
+      if(good) return;
+      else {
+        freebilateralbuffer();
+        init_cpu = false;
+        init_gpu = false;
+      }
+  }
+
   // filter standard deviations
   theta_alpha_ = stdv_bilateral_space;
   theta_gamma_ = stdv_spatial_space;
