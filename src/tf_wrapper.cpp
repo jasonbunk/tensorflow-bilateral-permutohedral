@@ -128,6 +128,37 @@ struct LaunchBilateralFiltersGrad<CPUDevice, T> {
 private:
     LaunchBilateralFiltersGrad() : filterer(nullptr) {std::cout<<"@@@@@@@@@@@@@@@@@@@@@@@@ LaunchBilateralFiltersGrad() private constructor"<<std::endl;}
 };
+template <typename T>
+struct LaunchBilateralFiltersGrad<GPUDevice, T> {
+    LaunchBilateralFiltersGrad(float stdv_spatial_space, float stdv_bilater_space,
+                        CONST_TENSORSHAPE_4INPUTS,
+                        BilateralInterface<T> * newfilterer) : filterer(newfilterer) {
+        caffe::Caffe::set_mode(caffe::Caffe::GPU);
+        CHECK(filterer != nullptr) << "filterer == nullptr!!";
+        BLOB_T_BLOB_CONSTRUCT;
+        filterer->OneTimeSetUp(BLOB_4PTR_ARGS,
+                               stdv_spatial_space,
+                               stdv_bilater_space);
+    }
+    void launch(OpKernelContext* context,
+                    CONST_TENSOR_4INPUTS,
+                    TENSOR_4GRADOUTPUTS,
+                    const Tensor& topgrad_spatial,
+                    const Tensor& topgrad_bilater) {
+        BLOB_T_BLOB_CONSTRUCT;
+        BLOB_T_BLOB_ASSIGN_DIFFS;
+        Blob<T> blob_topgrad_spatial(&topgrad_spatial); blob_topgrad_spatial.assign_diff_buf(&topgrad_spatial);
+        Blob<T> blob_topgrad_bilater(&topgrad_bilater); blob_topgrad_bilater.assign_diff_buf(&topgrad_bilater);
+        CHECK(filterer != nullptr) << "filterer == nullptr!!";
+        filterer->Backward_gpu(BLOB_4PTR_ARGS,
+                              &blob_topgrad_spatial,
+                              &blob_topgrad_bilater);
+    }
+    BilateralInterface<T> * filterer;
+    float stdv_spatial_space, stdv_bilater_space;
+private:
+    LaunchBilateralFiltersGrad() : filterer(nullptr) {std::cout<<"@@@@@@@@@@@@@@@@@@@@@@@@ LaunchBilateralFiltersGrad() private constructor"<<std::endl;}
+};
 
 // OPS
 template<typename Device, typename T>
@@ -305,23 +336,29 @@ Status BilateralFiltersGrad(const AttrSlice& attrs, FunctionDef* g) {
       Name("BilateralFilters").Device(DEVICE_CPU).TypeConstraint<type>("T"),     \
       BilateralFiltersOp<CPUDevice, type>);                                      \
   REGISTER_KERNEL_BUILDER(                                                       \
+      Name("BilateralFilters").Device(DEVICE_GPU).TypeConstraint<type>("T"),     \
+      BilateralFiltersOp<GPUDevice, type>);                                      \
+  REGISTER_KERNEL_BUILDER(                                                       \
       Name("BilateralFiltersGrad").Device(DEVICE_CPU).TypeConstraint<type>("T"), \
-      BilateralFiltersGradOp<CPUDevice, type>);
+      BilateralFiltersGradOp<CPUDevice, type>);                                  \
+  REGISTER_KERNEL_BUILDER(                                                       \
+      Name("BilateralFiltersGrad").Device(DEVICE_GPU).TypeConstraint<type>("T"), \
+      BilateralFiltersGradOp<GPUDevice, type>);
 
 #if 0
 #define REGISTER_MYBILATERALFILT_KERNELS(type)                                   \
   REGISTER_KERNEL_BUILDER(                                                       \
       Name("BilateralFilters").Device(DEVICE_CPU).TypeConstraint<type>("T"),     \
-      BilateralFiltersOp<Eigen::ThreadPoolDevice, type>);                        \
+      BilateralFiltersOp<CPUDevice, type>);                        \
   REGISTER_KERNEL_BUILDER(                                                       \
       Name("BilateralFiltersGrad").Device(DEVICE_CPU).TypeConstraint<type>("T"), \
-      BilateralFiltersGradOp<Eigen::ThreadPoolDevice, type>);                    \
+      BilateralFiltersGradOp<CPUDevice, type>);                    \
   REGISTER_KERNEL_BUILDER(                                                       \
       Name("BilateralFilters").Device(DEVICE_GPU).TypeConstraint<type>("T"),     \
-      BilateralFiltersOp<Eigen::GpuDevice, type>);                               \
+      BilateralFiltersOp<GPUDevice, type>);                               \
   REGISTER_KERNEL_BUILDER(                                                       \
       Name("BilateralFiltersGrad").Device(DEVICE_GPU).TypeConstraint<type>("T"), \
-      BilateralFiltersGradOp<Eigen::GpuDevice, type>);
+      BilateralFiltersGradOp<GPUDevice, type>);
 #endif
 
 REGISTER_MYBILATERALFILT_KERNELS(float);

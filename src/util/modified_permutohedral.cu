@@ -475,30 +475,34 @@ void ModifiedPermutohedral::init_gpu(const float* features, int num_dimensions, 
   d_ = num_dimensions ;
   N_ = w*h ;
   switch(num_dimensions){
-    case 2:
-      gpu_init<2>(features, &table, matrix, w_, h_);
-      break;
-    case 5:
-      gpu_init<5>(features, &table, matrix, w_, h_);
-      break;
+    case 2: gpu_init<2>(features, &table, matrix, w_, h_); break;
+    case 3: gpu_init<3>(features, &table, matrix, w_, h_); break;
+    case 4: gpu_init<4>(features, &table, matrix, w_, h_); break;
+    case 5: gpu_init<5>(features, &table, matrix, w_, h_); break;
+    case 6: gpu_init<6>(features, &table, matrix, w_, h_); break;
+    case 7: gpu_init<7>(features, &table, matrix, w_, h_); break;
+    case 8: gpu_init<8>(features, &table, matrix, w_, h_); break;
     default:
-      LOG(FATAL) << "num_dimensions should be 2 or 5";
+      LOG(FATAL) << "num_dimensions should be between 2 and 8";
   }
 }
+
+#define BUILDTEMPL_GPU_COMPUTE(numdims,dtype) case numdims: gpu_compute<numdims,dtype>(out, in, table, matrix, w_, h_, value_size, reverse, add); break
 
 void ModifiedPermutohedral::compute_gpu(float* out, const float* in, int value_size, bool reverse, bool add) const {
   // Losing time by dynamically allocating memory but more general function
   if(!is_init)
     LOG(FATAL) << "Initialize lattice before doing any computing";
   switch(d_){
-    case 2:
-      gpu_compute<2, float>(out, in, table, matrix, w_, h_, value_size, reverse, add);
-      break;
-    case 5:
-      gpu_compute<5, float>(out, in, table, matrix, w_, h_, value_size, reverse, add);
-      break;
+    BUILDTEMPL_GPU_COMPUTE(2,float);
+    BUILDTEMPL_GPU_COMPUTE(3,float);
+    BUILDTEMPL_GPU_COMPUTE(4,float);
+    BUILDTEMPL_GPU_COMPUTE(5,float);
+    BUILDTEMPL_GPU_COMPUTE(6,float);
+    BUILDTEMPL_GPU_COMPUTE(7,float);
+    BUILDTEMPL_GPU_COMPUTE(8,float);
     default:
-      LOG(FATAL) << "num_dimensions should be 2 or 5";
+      LOG(FATAL) << "num_dimensions should be between 2 and 8";
   }
 }
 
@@ -507,14 +511,15 @@ void ModifiedPermutohedral::compute_gpu(double* out, const double* in, int value
   if(!is_init)
     LOG(FATAL) << "Initialize lattice before doing any computing";
   switch(d_){
-    case 2:
-      gpu_compute<2, double>(out, in, table, matrix, w_, h_, value_size, reverse, add);
-      break;
-    case 5:
-      gpu_compute<5, double>(out, in, table, matrix, w_, h_, value_size, reverse, add);
-      break;
+    BUILDTEMPL_GPU_COMPUTE(2,double);
+    BUILDTEMPL_GPU_COMPUTE(3,double);
+    BUILDTEMPL_GPU_COMPUTE(4,double);
+    BUILDTEMPL_GPU_COMPUTE(5,double);
+    BUILDTEMPL_GPU_COMPUTE(6,double);
+    BUILDTEMPL_GPU_COMPUTE(7,double);
+    BUILDTEMPL_GPU_COMPUTE(8,double);
     default:
-      LOG(FATAL) << "num_dimensions should be 2 or 5";
+      LOG(FATAL) << "num_dimensions should be between 2 and 8";
   }
 }
 

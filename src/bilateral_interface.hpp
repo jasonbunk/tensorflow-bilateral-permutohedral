@@ -49,14 +49,25 @@ class BilateralInterface {
                 Blob<Dtype>* const featswrt,
                 Blob<Dtype>* const out_spatial,
                 Blob<Dtype>* const out_bilateral);
-//#ifndef CPU_ONLY
-//  void Backward_gpu();
-//#endif
+#ifndef CPU_ONLY
+  void Backward_gpu(
+                Blob<Dtype>* const input,
+                Blob<Dtype>* const featswrt,
+                Blob<Dtype>* const out_spatial,
+                Blob<Dtype>* const out_bilateral);
+#endif
 
   void compute_spatial_kernel(float* const output_kernel);
   void compute_bilateral_kernel(const Blob<Dtype>* const rgb_blob, const int n, float* const output_kernel);
 
-  explicit BilateralInterface() : init_cpu(false), init_gpu(false),
+  explicit BilateralInterface() : count_(0),
+                                  num_(0),
+                                  channels_(0),
+                                  height_(0),
+                                  width_(0),
+                                  num_pixels_(0),
+                                  wrt_chans_(0),
+                                  init_cpu(false), init_gpu(false),
                                   norm_feed_(nullptr),
                                   bilateral_kernel_buffer_(nullptr) {}
   ~BilateralInterface() {freebilateralbuffer();}

@@ -119,8 +119,7 @@ void BilateralInterface<Dtype>::OneTimeSetUp_KnownShapes() {
       caffe_gpu_set(num_pixels_, Dtype(1.0), norm_feed_);
       norm_data_gpu = spatial_norm_.mutable_gpu_data();
       spatial_lattice_->compute(norm_data_gpu, norm_feed_, 1);
-      norm_data = spatial_norm_.mutable_cpu_data();
-      gpu_setup_normalize_spatial_norms(norm_data);
+      gpu_setup_normalize_spatial_norms(norm_data_gpu);
       CUDA_CHECK(cudaMalloc((void**)&bilateral_kernel_buffer_, wrt_chans_ * num_pixels_ * sizeof(float)));
       CUDA_CHECK(cudaFree(spatial_kernel_gpu_));
       init_gpu = true;
@@ -214,15 +213,14 @@ void BilateralInterface<Dtype>::Backward_cpu(
     }
   }
 
-  caffe_set(input->count(),      Dtype(0.), input->mutable_cpu_diff());
-  caffe_set(featswrt->count(),   Dtype(0.), featswrt->mutable_cpu_diff());
+  caffe_set(featswrt->count(), Dtype(0.), featswrt->mutable_cpu_diff());
 
   for (int n = 0; n < num_; ++n) {
 
     // BP thru normalization
     Dtype *spatial_out_diff = out_spatial->mutable_cpu_diff() + out_spatial->offset(n);
     for (int channel_id = 0; channel_id < channels_; ++channel_id) {
-      caffe_mul(num_pixels_, spatial_norm_.cpu_data(),
+          caffe_mul(num_pixels_, spatial_norm_.cpu_data(),
                 spatial_out_diff + channel_id * num_pixels_,
                 spatial_out_diff + channel_id * num_pixels_);
     }
@@ -234,7 +232,7 @@ void BilateralInterface<Dtype>::Backward_cpu(
     // BP thru normalization
     Dtype *bilateral_out_diff = out_bilateral->mutable_cpu_diff() + out_bilateral->offset(n);
     for (int channel_id = 0; channel_id < channels_; ++channel_id) {
-      caffe_mul(num_pixels_, bilateral_norms_.cpu_data() + bilateral_norms_.offset(n),
+          caffe_mul(num_pixels_, bilateral_norms_.cpu_data() + bilateral_norms_.offset(n),
                 bilateral_out_diff + channel_id * num_pixels_,
                 bilateral_out_diff + channel_id * num_pixels_);
     }

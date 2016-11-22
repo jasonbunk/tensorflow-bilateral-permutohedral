@@ -2,7 +2,7 @@
 import os,sys
 
 # force run on CPU
-os.environ['CUDA_VISIBLE_DEVICES'] = ''
+# os.environ['CUDA_VISIBLE_DEVICES'] = ''
 
 from random import randint, uniform
 import numpy as np
