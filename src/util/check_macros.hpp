@@ -13,7 +13,7 @@ extern std::ostream* unprinted_output_stops_here;
 #ifndef ERROR
 #ifndef FATAL
 
-#define DEFAULTERRMSG "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"<<std::endl<<std::flush<<
+#define DEFAULTERRMSG "\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"<<std::endl<<std::flush<<
 #define INFO  0
 #define ERROR 1
 #define FATAL 2

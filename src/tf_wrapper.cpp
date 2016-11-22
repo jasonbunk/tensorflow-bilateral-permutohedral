@@ -8,6 +8,7 @@
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/shape_inference.h"
+#include "tensorflow/core/framework/function.h"
 
 typedef Eigen::ThreadPoolDevice CPUDevice;
 typedef Eigen::GpuDevice GPUDevice;
@@ -17,117 +18,124 @@ typedef Eigen::GpuDevice GPUDevice;
 
 namespace tensorflow {
 
-
 template <typename Device, typename T>
 struct LaunchBilateralFilters;
+template <typename Device, typename T>
+struct LaunchBilateralFiltersGrad;
 
 
+#define CONST_TENSORSHAPE_4INPUTS   const TensorShape & input, \
+                                    const TensorShape & ftwrt, \
+                                    const TensorShape & wspat, \
+                                    const TensorShape & wbila
+#define CONST_TENSOR_4INPUTS    const Tensor & input, \
+                                const Tensor & ftwrt, \
+                                const Tensor & wspat, \
+                                const Tensor & wbila
+#define TENSOR_4GRADOUTPUTS Tensor * grad_input, \
+                            Tensor * grad_ftwrt, \
+                            Tensor * grad_wspat, \
+                            Tensor * grad_wbila
+#define BLOB_T_BLOB_CONSTRUCT   Blob<T> blob_input(&input); \
+                                Blob<T> blob_ftwrt(&ftwrt); \
+                                Blob<T> blob_wspat(&wspat); \
+                                Blob<T> blob_wbila(&wbila)
+#define BLOB_PTR_ARGS   &blob_input, \
+                        &blob_ftwrt, \
+                        &blob_wspat, \
+                        &blob_wbila
+#define BLOB_T_BLOB_ASSIGN_DIFFS    blob_input.assign_diff_buf(grad_input), \
+                                    blob_ftwrt.assign_diff_buf(grad_ftwrt), \
+                                    blob_wspat.assign_diff_buf(grad_wspat), \
+                                    blob_wbila.assign_diff_buf(grad_wbila)
+
+// FORWARD PROPAGATIONS
 template <typename T>
 struct LaunchBilateralFilters<CPUDevice, T> {
     LaunchBilateralFilters(float stdv_spatial_space, float stdv_bilater_space,
-                        const TensorShape & blob_input_shape,
-                        const TensorShape & blob_ftwrt_shape,
-                        const TensorShape & blob_wspat_shape,
-                        const TensorShape & blob_wbila_shape,
+                        CONST_TENSORSHAPE_4INPUTS,
                         BilateralInterface<T> * newfilterer) : filterer(newfilterer) {
         caffe::Caffe::set_mode(caffe::Caffe::CPU);
         CHECK(filterer != nullptr) << "filterer == nullptr!!";
-        Blob<T> blob_input(&blob_input_shape);
-        Blob<T> blob_ftwrt(&blob_ftwrt_shape);
-        Blob<T> blob_wspat(&blob_wspat_shape);
-        Blob<T> blob_wbila(&blob_wbila_shape);
-        // setup filterer
-        filterer->OneTimeSetUp(&blob_input,
-                               &blob_ftwrt,
-                               &blob_wspat,
-                               &blob_wbila,
+        BLOB_T_BLOB_CONSTRUCT;
+        filterer->OneTimeSetUp(BLOB_PTR_ARGS,
                                stdv_spatial_space,
                                stdv_bilater_space);
     }
-
     void launch(OpKernelContext* context,
-                    const Tensor& input,
-                    const Tensor& ftwrt,
-                    const Tensor& wspat,
-                    const Tensor& wbila,
+                    CONST_TENSOR_4INPUTS,
                     Tensor* output) {
-        // inputs
-        Blob<T> blob_input(&input);
-        Blob<T> blob_ftwrt(&ftwrt);
-        Blob<T> blob_wspat(&wspat);
-        Blob<T> blob_wbila(&wbila);
-        // output
+        BLOB_T_BLOB_CONSTRUCT;
         Blob<T> blob_ouput(output);
-
         CHECK(filterer != nullptr) << "filterer == nullptr!!";
-        filterer->Forward_cpu(&blob_input,
-                             &blob_ftwrt,
-                             &blob_wspat,
-                             &blob_wbila,
+        filterer->Forward_cpu(BLOB_PTR_ARGS,
                              &blob_ouput);
     }
-
     BilateralInterface<T> * filterer;
     float stdv_spatial_space, stdv_bilater_space;
 private:
     LaunchBilateralFilters() : filterer(nullptr) {std::cout<<"@@@@@@@@@@@@@@@@@@@@@@@@ LaunchBilateralFilters() private constructor"<<std::endl;}
 };
-
-
 template <typename T>
 struct LaunchBilateralFilters<GPUDevice, T> {
     LaunchBilateralFilters(float stdv_spatial_space, float stdv_bilater_space,
-                        const TensorShape & blob_input_shape,
-                        const TensorShape & blob_ftwrt_shape,
-                        const TensorShape & blob_wspat_shape,
-                        const TensorShape & blob_wbila_shape,
+                        CONST_TENSORSHAPE_4INPUTS,
                         BilateralInterface<T> * newfilterer) : filterer(newfilterer) {
         caffe::Caffe::set_mode(caffe::Caffe::GPU);
         CHECK(filterer != nullptr) << "filterer == nullptr!!";
-        Blob<T> blob_input(&blob_input_shape);
-        Blob<T> blob_ftwrt(&blob_ftwrt_shape);
-        Blob<T> blob_wspat(&blob_wspat_shape);
-        Blob<T> blob_wbila(&blob_wbila_shape);
-        // setup filterer
-        filterer->OneTimeSetUp(&blob_input,
-                               &blob_ftwrt,
-                               &blob_wspat,
-                               &blob_wbila,
+        BLOB_T_BLOB_CONSTRUCT;
+        filterer->OneTimeSetUp(BLOB_PTR_ARGS,
                                stdv_spatial_space,
                                stdv_bilater_space);
-        std::cout<<"LaunchBilateralFilters(): done!!"<<std::endl;
     }
-
     void launch(OpKernelContext* context,
-                    const Tensor& input,
-                    const Tensor& ftwrt,
-                    const Tensor& wspat,
-                    const Tensor& wbila,
+                    CONST_TENSOR_4INPUTS,
                     Tensor* output) {
-        // inputs
-        Blob<T> blob_input(&input);
-        Blob<T> blob_ftwrt(&ftwrt);
-        Blob<T> blob_wspat(&wspat);
-        Blob<T> blob_wbila(&wbila);
-        // output
+        BLOB_T_BLOB_CONSTRUCT;
         Blob<T> blob_ouput(output);
-
         CHECK(filterer != nullptr) << "filterer == nullptr!!";
-
-        filterer->Forward_gpu(&blob_input,
-                             &blob_ftwrt,
-                             &blob_wspat,
-                             &blob_wbila,
+        filterer->Forward_gpu(BLOB_PTR_ARGS,
                              &blob_ouput);
     }
-
     BilateralInterface<T> * filterer;
     float stdv_spatial_space, stdv_bilater_space;
 private:
     LaunchBilateralFilters() : filterer(nullptr) {std::cout<<"@@@@@@@@@@@@@@@@@@@@@@@@ LaunchBilateralFilters() private constructor"<<std::endl;}
 };
+// BACKWARD GRADIENT PROPAGATIONS
+template <typename T>
+struct LaunchBilateralFiltersGrad<CPUDevice, T> {
+    LaunchBilateralFiltersGrad(float stdv_spatial_space, float stdv_bilater_space,
+                        CONST_TENSORSHAPE_4INPUTS,
+                        BilateralInterface<T> * newfilterer) : filterer(newfilterer) {
+        caffe::Caffe::set_mode(caffe::Caffe::CPU);
+        CHECK(filterer != nullptr) << "filterer == nullptr!!";
+        BLOB_T_BLOB_CONSTRUCT;
+        filterer->OneTimeSetUp(BLOB_PTR_ARGS,
+                               stdv_spatial_space,
+                               stdv_bilater_space);
+    }
+    void launch(OpKernelContext* context,
+                    CONST_TENSOR_4INPUTS,
+                    TENSOR_4GRADOUTPUTS,
+                    const Tensor& topgrad) {
+        BLOB_T_BLOB_CONSTRUCT;
+        BLOB_T_BLOB_ASSIGN_DIFFS;
+        Blob<T> blob_topgrad(&topgrad);
+        blob_topgrad.assign_diff_buf(&topgrad);
+        CHECK(filterer != nullptr) << "filterer == nullptr!!";
+        std::cout<<"^^^^^^^^^^^^^^^^^^^^^^^^^ launching Backward_cpu()"<<std::endl;
+        filterer->Backward_cpu(BLOB_PTR_ARGS,
+                              &blob_topgrad);
+        std::cout<<"^^^^^^^^^^^^^^^^^^^^^^^^^ done with Backward_cpu()"<<std::endl;
+    }
+    BilateralInterface<T> * filterer;
+    float stdv_spatial_space, stdv_bilater_space;
+private:
+    LaunchBilateralFiltersGrad() : filterer(nullptr) {std::cout<<"@@@@@@@@@@@@@@@@@@@@@@@@ LaunchBilateralFiltersGrad() private constructor"<<std::endl;}
+};
 
-
+// OPS
 template<typename Device, typename T>
 class BilateralFiltersOp: public OpKernel {
 public:
@@ -151,8 +159,7 @@ public:
         const Tensor& wbila = context->input(3);
         // output
         Tensor* output = nullptr;
-        OP_REQUIRES_OK(context,
-                context->allocate_output(0, input.shape(), &output));
+        OP_REQUIRES_OK(context, context->allocate_output(0, input.shape(), &output));
 
         // check 4 dimensional inputs
         auto err0 = errors::InvalidArgument("shape must be 4-dimensional");
@@ -198,42 +205,59 @@ private:
 };
 
 
-#if 0
 template<typename Device, typename T>
 class BilateralFiltersGradOp: public OpKernel {
 public:
     explicit BilateralFiltersGradOp(OpKernelConstruction* context) :
             OpKernel(context) {
-
+        // get scalars
+        OP_REQUIRES_OK(context, context->GetAttr("stdv_spatial_space", &stdv_spatial_space));
+        OP_REQUIRES_OK(context, context->GetAttr("stdv_bilater_space", &stdv_bilater_space));
+        // check scalars
+        OP_REQUIRES(context, stdv_spatial_space > 0.0f,
+            errors::InvalidArgument("require stdv_spatial_space > 0.0, got: ", stdv_spatial_space));
+        OP_REQUIRES(context, stdv_bilater_space > 0.0f,
+            errors::InvalidArgument("require stdv_bilater_space > 0.0, got: ", stdv_bilater_space));
     }
 
     void Compute(OpKernelContext* context) override {
-        printf("called BilateralFiltersGradOp.Compute() \n");
-        const Tensor& gradients = context->input(0);
-        const Tensor& features = context->input(1);
-        printf("Debug BilateralFiltersOpGrad Gradients: %s \n",gradients.DebugString().c_str());
-        printf("Debug BilateralFiltersOpGrad Features: %s \n",features.DebugString().c_str());
+        // inputs
+        const Tensor& input = context->input(0);
+        const Tensor& ftwrt = context->input(1);
+        const Tensor& wspat = context->input(2);
+        const Tensor& wbila = context->input(3);
+        const Tensor& topgrad = context->input(4);
+        // output gradients
+        Tensor* grad_input = nullptr; OP_REQUIRES_OK(context, context->allocate_output(0, input.shape(), &grad_input));
+        Tensor* grad_ftwrt = nullptr; OP_REQUIRES_OK(context, context->allocate_output(1, ftwrt.shape(), &grad_ftwrt));
+        Tensor* grad_wspat = nullptr; OP_REQUIRES_OK(context, context->allocate_output(2, wspat.shape(), &grad_wspat));
+        Tensor* grad_wbila = nullptr; OP_REQUIRES_OK(context, context->allocate_output(3, wbila.shape(), &grad_wbila));
 
-        TensorShape output_shape = features.shape();
-
-        Tensor* output = nullptr;
-        OP_REQUIRES_OK(context,
-                context->allocate_output(0, output_shape, &output));
-        output->flat<T>().setZero();
-
-        const T* btm_ptr = gradients.flat<T>().data();
-        T* top_ptr = output->flat<T>().data();
-
-        for (int i = 0; i < gradients.NumElements(); ++i) {
-            top_ptr[i] = btm_ptr[i];
-        }
-
-        printf("Debug BilateralFiltersOpGrad Output: %s \n",output->DebugString().c_str());
-        printf("---------------------------------- \n");
+        LaunchBilateralFiltersGrad<Device,T> launcher(stdv_spatial_space,
+                                                  stdv_bilater_space,
+                                                  input.shape(),
+                                                  ftwrt.shape(),
+                                                  wspat.shape(),
+                                                  wbila.shape(),
+                                                  &filterer);
+        launcher.launch(context, input,
+                                ftwrt,
+                                wspat,
+                                wbila,
+                                grad_input,
+                                grad_ftwrt,
+                                grad_wspat,
+                                grad_wbila,
+                                topgrad);
     }
 
+    BilateralInterface<T> filterer;
+    float stdv_spatial_space, stdv_bilater_space;
+
+private:
+    BilateralFiltersGradOp()  {std::cout<<"@@@@@@@@@@@@@@@@@@@@@@@@ BilateralFiltersGradOp() private constructor"<<std::endl;}
+    ~BilateralFiltersGradOp() {std::cout<<"@@@@@@@@@@@@@@@@@@@@@@@@ BilateralFiltersGradOp() private destructor"<<std::endl;}
 };
-#endif
 
 
 REGISTER_OP("BilateralFilters")
@@ -263,48 +287,56 @@ Copies all input values to the output
       return Status::OK();
 });
 
-#if 0
 REGISTER_OP("BilateralFiltersGrad")
-.Input("orig_input: T")
-.Input("orig_featswrt: T")
-.Input("orig_output: T")
-.Input("grad: T")
-.Output("output: T")
+.Input("input: T")
+.Input("featswrt: T")
+.Input("wspatial: T")
+.Input("wbilateral: T")
+.Input("top_grad: T")
+.Attr("stdv_spatial_space: float = 1.0")
+.Attr("stdv_bilater_space: float = 1.0")
+.Output("grad_input: T")
+.Output("grad_featswrt: T")
+.Output("grad_wspatial: T")
+.Output("grad_wbilateral: T")
 .Attr("T: realnumbertype")
 .Doc(R"doc(
-TODO!!
+Copies all input values to the output
 )doc");
 
+#if 0
+typedef FunctionDefHelper FDH;
 Status BilateralFiltersGrad(const AttrSlice& attrs, FunctionDef* g) {
   // clang-format off
   *g = FDH::Define(
     // Arg defs
-    {"input: T", "grad: T"},
+    {"input: T", "featswrt: T", "wspatial: T", "wbilateral: T", "top_grad: T"},
     // Ret val defs
-    {"output: T"},
+    {"grad_input: T", "grad_featswrt: T", "grad_wspatial: T", "grad_wbilateral: T"},
     // Attr defs
-    {"T: {float, half} = DT_FLOAT",
-     "ksize: list(int) >= 4",
-     "strides: list(int) >= 4",
-     GetPaddingAttrString()},
+    {"T: realnumbertype",
+     "stdv_spatial_space: float",
+     "stdv_bilater_space: float"},
     // Nodes
     {
-      // Invoke MaxPool again to recompute the outputs (removed by CSE?).
-      {{"maxpool"}, "MaxPool", {"input"},
+      // forward op
+      {{"bfilttop"},
+       /*opname*/"BilateralFilters",
+       /*inputs*/{"input", "featswrt", "wspatial", "wbilateral"},
        /*Attrs=*/{{"T", "$T"},
-                  {"ksize", "$ksize"},
-                  {"strides", "$strides"},
-                  {"padding", "$padding"}}},
-      {{"output"}, "MaxPoolGrad", {"input", "maxpool", "grad"},
+                  {"stdv_spatial_space", "$stdv_spatial_space"},
+                  {"stdv_bilater_space", "$stdv_bilater_space"}}},
+      // backwards op
+      {{"grad_input","grad_featswrt","grad_wspatial","grad_wbilateral"},
+       /*opname*/"BilateralFiltersGrad",
+       /*inputs*/{"input", "featswrt", "wspatial", "wbilateral", "top_grad"},
        /*Attrs=*/{{"T", "$T"},
-                  {"ksize", "$ksize"},
-                  {"strides", "$strides"},
-                  {"padding", "$padding"}}}
+                  {"stdv_spatial_space", "$stdv_spatial_space"},
+                  {"stdv_bilater_space", "$stdv_bilater_space"}}}
     });
   // clang-format on
   return Status::OK();
 }
-REGISTER_OP_GRADIENT("MaxPool", MaxPoolGrad);
 #endif
 
 #define REGISTER_MYBILATERALFILT_KERNELS(type)                                   \
@@ -312,8 +344,8 @@ REGISTER_OP_GRADIENT("MaxPool", MaxPoolGrad);
       Name("BilateralFilters").Device(DEVICE_CPU).TypeConstraint<type>("T"),     \
       BilateralFiltersOp<CPUDevice, type>);                                      \
   REGISTER_KERNEL_BUILDER(                                                       \
-      Name("BilateralFilters").Device(DEVICE_GPU).TypeConstraint<type>("T"),     \
-      BilateralFiltersOp<Eigen::GpuDevice, type>);
+      Name("BilateralFiltersGrad").Device(DEVICE_CPU).TypeConstraint<type>("T"), \
+      BilateralFiltersGradOp<CPUDevice, type>);
 
 #if 0
 #define REGISTER_MYBILATERALFILT_KERNELS(type)                                   \
@@ -333,6 +365,9 @@ REGISTER_OP_GRADIENT("MaxPool", MaxPoolGrad);
 
 REGISTER_MYBILATERALFILT_KERNELS(float);
 //REGISTER_MYBILATERALFILT_KERNELS(double);
+
+
+//REGISTER_OP_GRADIENT("BilateralFilters", BilateralFiltersGrad);
 
 
 }

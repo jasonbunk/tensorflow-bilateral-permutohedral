@@ -96,13 +96,16 @@ void BilateralInterface<Dtype>::OneTimeSetUp_KnownShapes() {
 
   // Initialize the spatial lattice. This does not need to be computed for every image because we use a fixed size.
   float spatial_kernel[2 * num_pixels_];
-  float *spatial_kernel_gpu_;
   compute_spatial_kernel(spatial_kernel);
   spatial_lattice_.reset(new ModifiedPermutohedral());
   freebilateralbuffer();
 
-  spatial_norm_.Reshape(1, 1, height_, width_);
+#ifndef CPU_ONLY
+  float* spatial_kernel_gpu_ = nullptr;
   Dtype* norm_data_gpu = nullptr;
+#endif
+
+  spatial_norm_.Reshape(1, 1, height_, width_);
   Dtype* norm_data = nullptr;
   // Initialize the spatial lattice. This does not need to be computed for every image because we use a fixed size.
   switch (Caffe::mode()) {
@@ -229,10 +232,16 @@ void BilateralInterface<Dtype>::Forward_cpu(
 
 
 template<typename Dtype>
-void BilateralInterface<Dtype>::Backward_cpu() {
-  std::cout<<"TODO: BilateralInterface<Dtype>::Backward_cpu()"<<std::endl;
-  assert(False);
-#if 0
+void BilateralInterface<Dtype>::Backward_cpu(
+        Blob<Dtype>* const input,
+        Blob<Dtype>* const featswrt,
+        Blob<Dtype>* const wspatial,
+        Blob<Dtype>* const wbilateral,
+        Blob<Dtype>* const output) {
+
+  spatial_out_blob_.alloc_diff_buf();
+  bilateral_out_blob_.alloc_diff_buf();
+
   //---------------------------- Add unary gradient --------------------------
   //vector<bool> eltwise_propagate_down(2, true);
   //sum_layer_->Backward(sum_top_vec_, eltwise_propagate_down, sum_bottom_vec_);
@@ -252,10 +261,13 @@ void BilateralInterface<Dtype>::Backward_cpu() {
                           pairwise_.cpu_diff() + pairwise_.offset(n), (Dtype) 0.,
                           output->mutable_cpu_diff() + output->offset(n));
   }*/
+  std::cout<<"========================= Backward_cpu: 0"<<std::endl;
 
   // ------------------------- Gradient w.r.t. kernels weights ------------
-  caffe_set(wspatial->count(), Dtype(0.), wspatial->mutable_cpu_diff());
+  caffe_set(wspatial->count(),   Dtype(0.), wspatial->mutable_cpu_diff());
   caffe_set(wbilateral->count(), Dtype(0.), wbilateral->mutable_cpu_diff());
+
+  std::cout<<"========================= Backward_cpu: 1"<<std::endl;
 
   for (int n = 0; n < num_; ++n) {
     caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasTrans, channels_, channels_,
@@ -264,12 +276,16 @@ void BilateralInterface<Dtype>::Backward_cpu() {
                           wspatial->mutable_cpu_diff());
   }
 
+  std::cout<<"========================= Backward_cpu: 2"<<std::endl;
+
   for (int n = 0; n < num_; ++n) {
     caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasTrans, channels_, channels_,
                           num_pixels_, (Dtype) 1., output->cpu_diff() + output->offset(n),
                           bilateral_out_blob_.cpu_data() + bilateral_out_blob_.offset(n), (Dtype) 1.,
                           wbilateral->mutable_cpu_diff());
   }
+
+  std::cout<<"========================= Backward_cpu: 3"<<std::endl;
 
   /*Dtype* tmp = new Dtype[count_];
   caffe_mul<Dtype>(count_, output->cpu_diff(), spatial_out_blob_.cpu_data(), tmp);
@@ -292,6 +308,8 @@ void BilateralInterface<Dtype>::Backward_cpu() {
   //caffe_cpu_scale<Dtype>(count_, (wspatial->cpu_data())[0],
   //    output->cpu_diff(), spatial_out_blob_.mutable_cpu_diff());
 
+  std::cout<<"========================= Backward_cpu: 4"<<std::endl;
+
   for (int n = 0; n < num_; ++n) {
     caffe_cpu_gemm<Dtype>(CblasTrans, CblasNoTrans, channels_, num_pixels_, channels_, (Dtype) 1.,
                           wbilateral->cpu_data(), output->cpu_diff() + output->offset(n),
@@ -301,6 +319,7 @@ void BilateralInterface<Dtype>::Backward_cpu() {
   //caffe_cpu_scale<Dtype>(count_, (wbilateral->cpu_data())[0],
   //    output->cpu_diff(), bilateral_out_blob_.mutable_cpu_diff());
 
+  std::cout<<"========================= Backward_cpu: 5"<<std::endl;
 
   //---------------------------- BP thru normalization --------------------------
   for (int n = 0; n < num_; ++n) {
@@ -320,6 +339,8 @@ void BilateralInterface<Dtype>::Backward_cpu() {
     }
   }
 
+  std::cout<<"========================= Backward_cpu: 6"<<std::endl;
+
   //--------------------------- Gradient for message passing ---------------
   for (int n = 0; n < num_; ++n) {
 
@@ -332,10 +353,10 @@ void BilateralInterface<Dtype>::Backward_cpu() {
                                        channels_, true, true);
   }
 
+  std::cout<<"========================= Backward_cpu: 7"<<std::endl;
   //--------------------------------------------------------------------------------
   //vector<bool> propagate_down(2, true);
   //softmax_layer_->Backward(softmax_top_vec_, propagate_down, softmax_bottom_vec_);
-#endif
 }
 
 
@@ -393,7 +414,7 @@ void BilateralInterface<Dtype>::compute_spatial_kernel(float* const output_kerne
 
 
 /*	Compile certain expected uses of BilateralInterface.
-	Will cause linker errors ("undefined reference") if you use another type not defined here.
+	  Will cause "undefined reference" errors if you use a type not defined here.
 */
 template class BilateralInterface<float>;
 template class BilateralInterface<double>;

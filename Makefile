@@ -110,12 +110,11 @@ LIBRARIES += boost_system boost_filesystem m
 USE_OPENCV ?= 1
 
 ifeq ($(USE_OPENCV), 1)
-	LIBRARIES += opencv_core opencv_highgui opencv_imgproc 
+	LIBRARIES += opencv_core opencv_highgui opencv_imgproc
 
 	ifeq ($(OPENCV_VERSION), 3)
 		LIBRARIES += opencv_imgcodecs
 	endif
-		
 endif
 WARNINGS := -Wall -Wno-sign-compare
 
@@ -225,6 +224,8 @@ CXXFLAGS += -std=c++11
 # Tensorflow docs say to use this with GCC 5.0, else crash
 # CXXFLAGS += -D_GLIBCXX_USE_CXX11_ABI=0
 
+NVCCFLAGS += -D GOOGLE_CUDA=1 -x cu -Xcompiler -fPIC
+
 # Complete build flags.
 COMMON_FLAGS += $(foreach includedir,$(INCLUDE_DIRS),-I$(includedir))
 CXXFLAGS += -pthread -fPIC $(COMMON_FLAGS) $(WARNINGS)
@@ -258,17 +259,19 @@ EVERYTHING_TARGETS := all warn
 ##############################
 # Define build targets
 ##############################
-.PHONY: all lib clean docs linecount $(DIST_ALIASES) \
+.PHONY: all lib copypy clean docs linecount $(DIST_ALIASES) \
 	superclean supercleanlist supercleanfiles warn everything
 
-all: lib
+all: lib copypy
 
 lib: $(STATIC_NAME) $(DYNAMIC_NAME)
 
-everything: $(EVERYTHING_TARGETS)
+copypy: $(shell cp src/*.py build/lib)
 
-linecount:
-	cloc --read-lang-def=$(PROJECT).cloc src
+#everything: $(EVERYTHING_TARGETS)
+
+#linecount:
+#	cloc --read-lang-def=$(PROJECT).cloc src
 
 warn: $(EMPTY_WARN_REPORT)
 

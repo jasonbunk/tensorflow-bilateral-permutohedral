@@ -14,14 +14,19 @@ from myutils import describe
 # load library
 path2file = os.path.dirname(os.path.realpath(__file__))
 builtlibpath_dir = os.path.join(path2file, '../build/lib')
-builtlibpath = os.path.join(builtlibpath_dir, 'libtfgaussiancrf.so')
-libtfgaussiancrf = tf.load_op_library(builtlibpath)
-
-print("-----------------------------------")
-from inspect import getmembers, isfunction
-functions_list = [o for o in getmembers(libtfgaussiancrf) if isfunction(o[1])]
-print(str(functions_list))
-print("-----------------------------------")
+if False:
+    builtlibpath = os.path.join(builtlibpath_dir, 'libtfgaussiancrf.so')
+    libtfgaussiancrf = tf.load_op_library(builtlibpath)
+    print("-----------------------------------")
+    from inspect import getmembers, isfunction
+    functions_list = [o for o in getmembers(libtfgaussiancrf) if isfunction(o[1])]
+    print(str(functions_list))
+    print("-----------------------------------")
+    bilateral_filters = libtfgaussiancrf.bilateral_filters
+else:
+    sys.path.insert(1, os.path.join(sys.path[0], builtlibpath_dir))
+    import bilateral_op_and_grad
+    bilateral_filters = bilateral_op_and_grad.bilateral_filters
 
 #---------------------------------------------------------------------
 # setup a test
@@ -85,7 +90,7 @@ tf_x_placehold = tf.placeholder(tf.float32, train_x.shape, name="tf_x_placehold"
 tf_y_placehold = tf.placeholder(tf.float32, train_y.shape, name="tf_x_placehold")
 
 #----------------------------------------
-useCRF = False
+useCRF = True
 LEARNRATE = 0.05
 NUMITERS = 10000
 
@@ -108,12 +113,13 @@ else:
     tfwbilateral = tf.get_variable('tfwbilateral',initializer=tf.constant(npwbilateral))
 
     reshcc = NHWC_to_NCHW(comp_class * crfprescale)
-    almostpreds = libtfgaussiancrf.bilateral_filters(input=reshcc, #input
-                                                    featswrt=tf_x_placehold, #featswrt
-                                                    wspatial=tfwspatial,
-                                                    wbilateral=tfwbilateral,
-                                                    stdv_spatial_space=10.0,
-                                                    stdv_bilater_space=10.0)
+    tf_x_nchw = NHWC_to_NCHW(tf_x_placehold)
+    almostpreds = bilateral_filters(input=reshcc, #input
+                                    featswrt=tf_x_nchw, #featswrt
+                                    wspatial=tfwspatial,
+                                    wbilateral=tfwbilateral,
+                                    stdv_spatial_space=10.0,
+                                    stdv_bilater_space=10.0)
     finalpred_logits = NCHW_to_NHWC(almostpreds)
 
 finalpred_softmax = tf.nn.softmax(finalpred_logits)

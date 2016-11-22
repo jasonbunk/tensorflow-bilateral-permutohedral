@@ -48,7 +48,12 @@ class BilateralInterface {
   /**
    * Backward pass - to be called during training.
    */
-  void Backward_cpu();
+  void Backward_cpu(
+                Blob<Dtype>* const input,
+                Blob<Dtype>* const featswrt,
+                Blob<Dtype>* const wspatial,
+                Blob<Dtype>* const wbilateral,
+                Blob<Dtype>* const output);
 //#ifndef CPU_ONLY
 //  void Backward_gpu();
 //#endif

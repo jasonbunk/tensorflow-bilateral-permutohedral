@@ -18,10 +18,10 @@ class Tensor;
 template <typename Dtype>
 class Blob {
 public:
-    Blob() : fromTFtensor(false), buf_(nullptr) {}
-    Blob(tensorflow::TensorShape const*const input)    : fromTFtensor(false), buf_(nullptr) {ShapeFrom(input);}
-    Blob(tensorflow::Tensor const*const input)         : fromTFtensor(false), buf_(nullptr) {DataFrom(input);}
-    Blob(int batch, int chans, int rows, int cols)     : fromTFtensor(false), buf_(nullptr) {alloc(batch, chans, rows, cols);}
+    Blob() : fromTFtensor(false), buf_(nullptr),bufdiff_(nullptr) {}
+    Blob(tensorflow::TensorShape const*const input)    : fromTFtensor(false), buf_(nullptr),bufdiff_(nullptr) {ShapeFrom(input);}
+    Blob(tensorflow::Tensor const*const input)         : fromTFtensor(false), buf_(nullptr),bufdiff_(nullptr) {DataFrom(input);}
+    Blob(int batch, int chans, int rows, int cols)     : fromTFtensor(false), buf_(nullptr),bufdiff_(nullptr) {alloc(batch, chans, rows, cols);}
 
     void DataFrom(tensorflow::Tensor const*const input);
     void ShapeFrom(tensorflow::TensorShape const*const input);
@@ -58,16 +58,27 @@ public:
 
     Dtype const*const cpu_data() const {return buf_;}
     Dtype * mutable_cpu_data()         {return buf_;}
-
     Dtype const*const gpu_data() const {return buf_;}
     Dtype * mutable_gpu_data()         {return buf_;}
+
+    Dtype const*const cpu_diff() const {return bufdiff_;}
+    Dtype * mutable_cpu_diff()         {return bufdiff_;}
+    Dtype const*const gpu_diff() const {return bufdiff_;}
+    Dtype * mutable_gpu_diff()         {return bufdiff_;}
+
+    void alloc_diff_buf();
+    void assign_diff_buf(tensorflow::Tensor const*const input);
 
     void Reshape(int batch, int chans, int rows, int cols) {
         assert(fromTFtensor == false);
         if(buf_ == nullptr) {
             alloc(batch, chans, rows, cols);
         } else {
-            assert(batch*rows*cols*chans == count());
+            if(batch*rows*cols*chans != count()) {
+                std::cout<<"@@@@@@@@@@@@@@@@@@@@ FATAL ERROR: blob::Reshape(): "
+                         <<"batch*rows*cols*chans != count()"<<std::endl;
+                assert(0);
+            }
         }
     }
 
@@ -95,6 +106,7 @@ private:
     std::vector<int> shape_;
     Dtype* buf_; // not refcounted; it's assumed these come from a Tensor object
                  // which is already refcounted
+    Dtype* bufdiff_;
 };
 
 #endif
