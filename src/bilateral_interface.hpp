@@ -33,13 +33,11 @@ class BilateralInterface {
                 Blob<Dtype>* const featswrt,
                 Blob<Dtype>* const out_spatial,
                 Blob<Dtype>* const out_bilateral);
-#ifndef CPU_ONLY
   void Forward_gpu(
                 Blob<Dtype>* const input,
                 Blob<Dtype>* const featswrt,
                 Blob<Dtype>* const out_spatial,
                 Blob<Dtype>* const out_bilateral);
-#endif
 
   /**
    * Backward pass - to be called during training.
@@ -49,13 +47,11 @@ class BilateralInterface {
                 Blob<Dtype>* const featswrt,
                 Blob<Dtype>* const out_spatial,
                 Blob<Dtype>* const out_bilateral);
-#ifndef CPU_ONLY
   void Backward_gpu(
                 Blob<Dtype>* const input,
                 Blob<Dtype>* const featswrt,
                 Blob<Dtype>* const out_spatial,
                 Blob<Dtype>* const out_bilateral);
-#endif
 
   void compute_spatial_kernel(float* const output_kernel);
   void compute_bilateral_kernel(const Blob<Dtype>* const rgb_blob, const int n, float* const output_kernel);

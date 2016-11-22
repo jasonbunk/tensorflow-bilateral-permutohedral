@@ -296,6 +296,21 @@ void BilateralInterface<Dtype>::compute_spatial_kernel(float* const output_kerne
   }
 }
 
+#ifdef CPU_ONLY
+// stub GPU functions
+template <typename Dtype>
+void BilateralInterface<Dtype>::Forward_gpu(
+       Blob<Dtype>* const input,
+       Blob<Dtype>* const featswrt,
+       Blob<Dtype>* const out_spatial,
+       Blob<Dtype>* const out_bilateral) {}
+template <typename Dtype>
+void BilateralInterface<Dtype>::Backward_gpu(
+       Blob<Dtype>* const input,
+       Blob<Dtype>* const featswrt,
+       Blob<Dtype>* const out_spatial,
+       Blob<Dtype>* const out_bilateral) {}
+#endif
 
 /*	Compile certain expected uses of BilateralInterface.
 	  Will cause "undefined reference" errors if you use a type not defined here.
