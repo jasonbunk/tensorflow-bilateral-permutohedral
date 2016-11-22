@@ -231,11 +231,6 @@ public:
         Tensor* grad_wspat = nullptr; OP_REQUIRES_OK(context, context->allocate_output(2, wspat.shape(), &grad_wspat));
         Tensor* grad_wbila = nullptr; OP_REQUIRES_OK(context, context->allocate_output(3, wbila.shape(), &grad_wbila));
 
-        std::cout<<"Compute() grad_input "<<grad_input->DebugString()<<std::endl;
-        std::cout<<"Compute() grad_ftwrt "<<grad_ftwrt->DebugString()<<std::endl;
-        std::cout<<"Compute() grad_wspat "<<grad_wspat->DebugString()<<std::endl;
-        std::cout<<"Compute() grad_wbila "<<grad_wbila->DebugString()<<std::endl;
-
         LaunchBilateralFiltersGrad<Device,T> launcher(stdv_spatial_space,
                                                   stdv_bilater_space,
                                                   input.shape(),

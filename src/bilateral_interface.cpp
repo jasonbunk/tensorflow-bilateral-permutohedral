@@ -242,29 +242,22 @@ void BilateralInterface<Dtype>::Backward_cpu(
   spatial_out_blob_.alloc_diff_buf();
   bilateral_out_blob_.alloc_diff_buf();
 
-  std::cout<<"spatial_out_blob_ "<<spatial_out_blob_.DebugStr()<<std::endl;
-  std::cout<<"bilateral_out_blob_ "<<bilateral_out_blob_.DebugStr()<<std::endl;
-
-  //---------------------------- Add unary gradient --------------------------
-  //vector<bool> eltwise_propagate_down(2, true);
-  //sum_layer_->Backward(sum_top_vec_, eltwise_propagate_down, sum_bottom_vec_);
-  //---------------------------- Update compatibility diffs ------------------
-  /*caffe_set(this->blobs_[2]->count(), Dtype(0.), this->blobs_[2]->mutable_cpu_diff());
-
+  // Initialize the bilateral lattices
+  // (don't assume we have done a forward pass with this op)
+  bilateral_lattices_.resize(num_);
   for (int n = 0; n < num_; ++n) {
-    caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasTrans, channels_, channels_,
-                          num_pixels_, (Dtype) 1., pairwise_.cpu_diff() + pairwise_.offset(n),
-                          output->cpu_data() + output->offset(n), (Dtype) 1.,
-                          this->blobs_[2]->mutable_cpu_diff());
+
+    compute_bilateral_kernel(featswrt, n, bilateral_kernel_buffer_);
+    bilateral_lattices_[n].reset(new ModifiedPermutohedral());
+    bilateral_lattices_[n]->init(bilateral_kernel_buffer_, wrt_chans_, width_, height_);
+
+    // Calculate bilateral filter normalization factors.
+    Dtype* norm_output_data = bilateral_norms_.mutable_cpu_data() + bilateral_norms_.offset(n);
+    bilateral_lattices_[n]->compute(norm_output_data, norm_feed_, 1);
+    for (int i = 0; i < num_pixels_; ++i) {
+      norm_output_data[i] = 1.f / (norm_output_data[i] + 1e-20f);
+    }
   }
-  //-------------------------- Gradient after compatibility transform--- -----
-  for (int n = 0; n < num_; ++n) {
-    caffe_cpu_gemm<Dtype>(CblasTrans, CblasNoTrans, channels_, num_pixels_,
-                          channels_, (Dtype) 1., this->blobs_[2]->cpu_data(),
-                          pairwise_.cpu_diff() + pairwise_.offset(n), (Dtype) 0.,
-                          output->mutable_cpu_diff() + output->offset(n));
-  }*/
-  std::cout<<"========================= Backward_cpu: 0"<<std::endl;
 
   caffe_set<Dtype>(input->count(),      Dtype(0.), input->mutable_cpu_diff());
   caffe_set<Dtype>(featswrt->count(),   Dtype(0.), featswrt->mutable_cpu_diff());
@@ -276,16 +269,12 @@ void BilateralInterface<Dtype>::Backward_cpu(
 
   // ------------------------- Gradient w.r.t. kernels weights ------------
 
-  std::cout<<"========================= Backward_cpu: 1"<<std::endl;
-
   for (int n = 0; n < num_; ++n) {
     caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasTrans, channels_, channels_,
                           num_pixels_, (Dtype) 1., output->cpu_diff() + output->offset(n),
                           spatial_out_blob_.cpu_data() + spatial_out_blob_.offset(n), (Dtype) 1.,
                           wspatial->mutable_cpu_diff());
   }
-
-  std::cout<<"========================= Backward_cpu: 2"<<std::endl;
 
   for (int n = 0; n < num_; ++n) {
     caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasTrans, channels_, channels_,
@@ -294,47 +283,6 @@ void BilateralInterface<Dtype>::Backward_cpu(
                           wbilateral->mutable_cpu_diff());
   }
 
-  std::cout<<"spatial_out_blob_ "<<spatial_out_blob_.DebugStr()<<std::endl;
-  std::cout<<"bilateral_out_blob_ "<<bilateral_out_blob_.DebugStr()<<std::endl;
-
-  std::cout<<"input "<<input->DebugStr()<<std::endl;
-  std::cout<<"featswrt "<<featswrt->DebugStr()<<std::endl;
-  std::cout<<"wspatial "<<wspatial->DebugStr()<<std::endl;
-  std::cout<<"wbilateral "<<wbilateral->DebugStr()<<std::endl;
-  std::cout<<"output "<<output->DebugStr()<<std::endl;
-
-  std::cout<<"num_ == "<<num_
-           <<", channels_ == "<<channels_
-           <<", num_pixels_ == "<<num_pixels_
-           <<std::endl;
-
-  std::cout<<"========================= Backward_cpu: 3"<<std::endl;
-
-  input->debug_visualize_buf_("backward-input");
-  featswrt->debug_visualize_buf_("backward-featswrt");
-  //wspatial->debug_visualize_buf_("backward-wspatial");
-  //wbilateral->debug_visualize_buf_("backward-wbilateral");
-  output->debug_visualize_buf_("backward-output");
-
-
-  input->debug_visualize_bufdiff_("backward-input-diff");
-  featswrt->debug_visualize_bufdiff_("backward-featswrt-diff");
-  //wspatial->debug_visualize_bufdiff_("backward-wspatial");
-  //wbilateral->debug_visualize_bufdiff_("backward-wbilateral");
-  output->debug_visualize_bufdiff_("backward-output-diff");
-
-
-  /*Dtype* tmp = new Dtype[count_];
-  caffe_mul<Dtype>(count_, output->cpu_diff(), spatial_out_blob_.cpu_data(), tmp);
-  for (int c = 0; c < count_; ++c) {
-    (wspatial->mutable_cpu_diff())[0] += tmp[c];
-  }
-  caffe_mul<Dtype>(count_, output->cpu_diff(), bilateral_out_blob_.cpu_data(), tmp);
-  for (int c = 0; c < count_; ++c) {
-    (wbilateral->mutable_cpu_diff())[0] += tmp[c];
-  }
-  delete[] tmp;*/
-
   // TODO: Check whether there's a way to improve the accuracy of this calculation.
   for (int n = 0; n < num_; ++n) {
     caffe_cpu_gemm<Dtype>(CblasTrans, CblasNoTrans, channels_, num_pixels_, channels_, (Dtype) 1.,
@@ -342,10 +290,6 @@ void BilateralInterface<Dtype>::Backward_cpu(
                           (Dtype) 0.,
                           spatial_out_blob_.mutable_cpu_diff() + spatial_out_blob_.offset(n));
   }
-  //caffe_cpu_scale<Dtype>(count_, (wspatial->cpu_data())[0],
-  //    output->cpu_diff(), spatial_out_blob_.mutable_cpu_diff());
-
-  std::cout<<"========================= Backward_cpu: 4"<<std::endl;
 
   for (int n = 0; n < num_; ++n) {
     caffe_cpu_gemm<Dtype>(CblasTrans, CblasNoTrans, channels_, num_pixels_, channels_, (Dtype) 1.,
@@ -353,10 +297,6 @@ void BilateralInterface<Dtype>::Backward_cpu(
                           (Dtype) 0.,
                           bilateral_out_blob_.mutable_cpu_diff() + bilateral_out_blob_.offset(n));
   }
-  //caffe_cpu_scale<Dtype>(count_, (wbilateral->cpu_data())[0],
-  //    output->cpu_diff(), bilateral_out_blob_.mutable_cpu_diff());
-
-  std::cout<<"========================= Backward_cpu: 5"<<std::endl;
 
   //---------------------------- BP thru normalization --------------------------
   for (int n = 0; n < num_; ++n) {
@@ -376,8 +316,6 @@ void BilateralInterface<Dtype>::Backward_cpu(
     }
   }
 
-  std::cout<<"========================= Backward_cpu: 6"<<std::endl;
-
   //--------------------------- Gradient for message passing ---------------
   for (int n = 0; n < num_; ++n) {
 
@@ -390,10 +328,6 @@ void BilateralInterface<Dtype>::Backward_cpu(
                                        channels_, true, true);
   }
 
-  std::cout<<"========================= Backward_cpu: 7"<<std::endl;
-  //--------------------------------------------------------------------------------
-  //vector<bool> propagate_down(2, true);
-  //softmax_layer_->Backward(softmax_top_vec_, propagate_down, softmax_bottom_vec_);
 }
 
 
