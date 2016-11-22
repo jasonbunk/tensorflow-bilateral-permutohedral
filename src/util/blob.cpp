@@ -1,6 +1,9 @@
 #include "blob.hpp"
 #include "tensorflow/core/framework/tensor.h"
 #include "common.hpp" // GPU/CPU modes, cuda utils
+#include "debug.hpp" // DebugStr utils
+#include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/highgui/highgui.hpp>
 
 
 template <typename Dtype>
@@ -123,6 +126,72 @@ void Blob<Dtype>::gpu_alloc(int batch, int chans, int rows, int cols) {
 #endif
 }
 
+template <typename Dtype>
+std::string Blob<Dtype>::DebugStr() {
+    std::string retstr = std::string("Blob<")
+                        +to_istring(sizeof(Dtype))
+                        +std::string(">");
+    if(shape_.empty()) {
+        return retstr + std::string(" is empty!");
+    }
+    retstr += std::string(" has shape [");
+    for(int ii=0; ii<num_axes(); ++ii) {
+        if(ii > 0) {retstr += std::string(", ");}
+        retstr += to_istring(shape(ii));
+    }
+    retstr += std::string("], buf_ = ") + to_sstring(buf_)
+            + std::string(", bufdiff_ = ")+to_sstring(bufdiff_)
+            + std::string(", count() = ")+to_istring(count())
+            + std::string(", fromTFtensor = ")+to_istring(fromTFtensor);
+    return retstr;
+}
+
+template <typename Dtype>
+void Blob<Dtype>::debug_visualize_buf_(std::string wname) {
+    debug_visualize(wname, buf_);
+}
+template <typename Dtype>
+void Blob<Dtype>::debug_visualize_bufdiff_(std::string wname) {
+    debug_visualize(wname, bufdiff_);
+}
+
+#define MINOF2(x,y) ((x)<(y)?(x):(y))
+#define MAXOF2(x,y) ((x)>(y)?(x):(y))
+
+template <typename Dtype>
+void Blob<Dtype>::debug_visualize(std::string wname, Dtype* thebuf) {
+  CHECK_EQ(num_axes(), 4);
+  const int nbatch = shape(0);
+  const int nchans = MINOF2(shape(1),3);
+  const int nrows = shape(2);
+  const int ncols = shape(3);
+  const int bytesperchan = ncols*nrows*sizeof(Dtype);
+  std::vector< cv::Mat_<Dtype> > testimgchans;
+  for(int cc=0; cc<nchans; ++cc) {
+    testimgchans.push_back(cv::Mat_<Dtype>(nrows, ncols));
+  }
+  if(nchans == 2) {
+      testimgchans.push_back(cv::Mat_<Dtype>::zeros(nrows, ncols));
+  }
+  cv::Mat mergedmat;
+  double minval,maxval,globalmin,globalmax;
+  globalmin = 1e20; globalmax = -1e20;
+
+  for(int mm=0; mm<nbatch; ++mm) {
+    for(int cc=0; cc<nchans; ++cc) {
+      memcpy(testimgchans[cc].data,
+             thebuf + offset(mm, cc, 0, 0),
+             bytesperchan);
+      cv::minMaxIdx(testimgchans[cc], &minval, &maxval);
+      globalmin = MINOF2(globalmin, minval);
+      globalmax = MAXOF2(globalmax, maxval);
+    }
+    std::cout<<"shown image: (min,max) == ("<<globalmin<<", "<<globalmax<<")"<<std::endl;
+    cv::merge(testimgchans, mergedmat);
+    cv::imshow(wname, (mergedmat-globalmin)/(1e-15f+globalmax-globalmin));
+    cv::waitKey(0);
+  }
+}
 
 /*	Compile certain expected uses of Blob.
 	Will cause "undefined reference" errors if you use a type not defined here.

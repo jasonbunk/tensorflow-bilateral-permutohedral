@@ -44,9 +44,9 @@ struct LaunchBilateralFiltersGrad;
                         &blob_ftwrt, \
                         &blob_wspat, \
                         &blob_wbila
-#define BLOB_T_BLOB_ASSIGN_DIFFS    blob_input.assign_diff_buf(grad_input), \
-                                    blob_ftwrt.assign_diff_buf(grad_ftwrt), \
-                                    blob_wspat.assign_diff_buf(grad_wspat), \
+#define BLOB_T_BLOB_ASSIGN_DIFFS    blob_input.assign_diff_buf(grad_input); \
+                                    blob_ftwrt.assign_diff_buf(grad_ftwrt); \
+                                    blob_wspat.assign_diff_buf(grad_wspat); \
                                     blob_wbila.assign_diff_buf(grad_wbila)
 
 // FORWARD PROPAGATIONS
@@ -124,10 +124,8 @@ struct LaunchBilateralFiltersGrad<CPUDevice, T> {
         Blob<T> blob_topgrad(&topgrad);
         blob_topgrad.assign_diff_buf(&topgrad);
         CHECK(filterer != nullptr) << "filterer == nullptr!!";
-        std::cout<<"^^^^^^^^^^^^^^^^^^^^^^^^^ launching Backward_cpu()"<<std::endl;
         filterer->Backward_cpu(BLOB_PTR_ARGS,
                               &blob_topgrad);
-        std::cout<<"^^^^^^^^^^^^^^^^^^^^^^^^^ done with Backward_cpu()"<<std::endl;
     }
     BilateralInterface<T> * filterer;
     float stdv_spatial_space, stdv_bilater_space;
@@ -232,6 +230,11 @@ public:
         Tensor* grad_ftwrt = nullptr; OP_REQUIRES_OK(context, context->allocate_output(1, ftwrt.shape(), &grad_ftwrt));
         Tensor* grad_wspat = nullptr; OP_REQUIRES_OK(context, context->allocate_output(2, wspat.shape(), &grad_wspat));
         Tensor* grad_wbila = nullptr; OP_REQUIRES_OK(context, context->allocate_output(3, wbila.shape(), &grad_wbila));
+
+        std::cout<<"Compute() grad_input "<<grad_input->DebugString()<<std::endl;
+        std::cout<<"Compute() grad_ftwrt "<<grad_ftwrt->DebugString()<<std::endl;
+        std::cout<<"Compute() grad_wspat "<<grad_wspat->DebugString()<<std::endl;
+        std::cout<<"Compute() grad_wbila "<<grad_wbila->DebugString()<<std::endl;
 
         LaunchBilateralFiltersGrad<Device,T> launcher(stdv_spatial_space,
                                                   stdv_bilater_space,

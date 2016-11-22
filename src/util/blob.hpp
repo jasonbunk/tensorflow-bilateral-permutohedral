@@ -15,18 +15,30 @@ class TensorShape;
 class Tensor;
 }
 
+#define BLOBCONSTRDEFAULTS  shape_1(0),   \
+                            shape_2(0),   \
+                            shape_3(0),   \
+                            shape_23(0),  \
+                            shape_123(0), \
+                            count_(0),    \
+                            fromTFtensor(false), \
+                            buf_(nullptr), bufdiff_(nullptr)
+
 template <typename Dtype>
 class Blob {
 public:
-    Blob() : fromTFtensor(false), buf_(nullptr),bufdiff_(nullptr) {}
-    Blob(tensorflow::TensorShape const*const input)    : fromTFtensor(false), buf_(nullptr),bufdiff_(nullptr) {ShapeFrom(input);}
-    Blob(tensorflow::Tensor const*const input)         : fromTFtensor(false), buf_(nullptr),bufdiff_(nullptr) {DataFrom(input);}
-    Blob(int batch, int chans, int rows, int cols)     : fromTFtensor(false), buf_(nullptr),bufdiff_(nullptr) {alloc(batch, chans, rows, cols);}
+    Blob() : BLOBCONSTRDEFAULTS {}
+    Blob(tensorflow::TensorShape const*const input) : BLOBCONSTRDEFAULTS {ShapeFrom(input);}
+    Blob(tensorflow::Tensor const*const input)      : BLOBCONSTRDEFAULTS {DataFrom(input);}
+    Blob(int batch, int chans, int rows, int cols)  : BLOBCONSTRDEFAULTS {alloc(batch, chans, rows, cols);}
 
     void DataFrom(tensorflow::Tensor const*const input);
     void ShapeFrom(tensorflow::TensorShape const*const input);
     void alloc(int batch, int chans, int rows, int cols);
     void free_data();
+    std::string DebugStr();
+    void debug_visualize_buf_(std::string wname);
+    void debug_visualize_bufdiff_(std::string wname);
 
     ~Blob() {free_data();}
 
@@ -83,18 +95,17 @@ public:
     }
 
 private:
+    void debug_visualize(std::string wname, Dtype* thebuf);
     void cpu_alloc(int batch, int chans, int rows, int cols);
     void gpu_alloc(int batch, int chans, int rows, int cols);
     void ResetShapes() {
+        assert(num_axes() == 4);
         shape_1 = shape(1);
         shape_2 = shape(2);
         shape_3 = shape(3);
         shape_23 = shape_2 * shape_3;
         shape_123 = shape_1 * shape_2 * shape_3;
-        count_ = 0;
-        for(int ii=0; ii<num_axes(); ++ii) {
-            count_ += shape(ii);
-        }
+        count_ = shape(0) * shape_123;
     }
     int shape_1;
     int shape_2;

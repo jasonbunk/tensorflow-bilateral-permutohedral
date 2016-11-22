@@ -114,7 +114,7 @@ void BilateralInterface<Dtype>::OneTimeSetUp_KnownShapes() {
       spatial_lattice_->init(spatial_kernel, 2, width_, height_);
       // Calculate spatial filter normalization factors.
       norm_feed_= new Dtype[num_pixels_];
-      caffe_set(num_pixels_, Dtype(1.0), norm_feed_);
+      caffe_set<Dtype>(num_pixels_, Dtype(1.0), norm_feed_);
       spatial_lattice_->compute(norm_data, norm_feed_, 1);
       for (int i = 0; i < num_pixels_; ++i) {
         norm_data[i] = 1.0f / (norm_data[i] + 1e-20f);
@@ -203,7 +203,7 @@ void BilateralInterface<Dtype>::Forward_cpu(
     }
   }
 
-  caffe_set(count_, Dtype(0.), output->mutable_cpu_data());
+  caffe_set<Dtype>(count_, Dtype(0.), output->mutable_cpu_data());
 
   for (int n = 0; n < num_; ++n) {
     caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, channels_, num_pixels_, channels_, (Dtype) 1.,
@@ -242,6 +242,9 @@ void BilateralInterface<Dtype>::Backward_cpu(
   spatial_out_blob_.alloc_diff_buf();
   bilateral_out_blob_.alloc_diff_buf();
 
+  std::cout<<"spatial_out_blob_ "<<spatial_out_blob_.DebugStr()<<std::endl;
+  std::cout<<"bilateral_out_blob_ "<<bilateral_out_blob_.DebugStr()<<std::endl;
+
   //---------------------------- Add unary gradient --------------------------
   //vector<bool> eltwise_propagate_down(2, true);
   //sum_layer_->Backward(sum_top_vec_, eltwise_propagate_down, sum_bottom_vec_);
@@ -263,9 +266,15 @@ void BilateralInterface<Dtype>::Backward_cpu(
   }*/
   std::cout<<"========================= Backward_cpu: 0"<<std::endl;
 
+  caffe_set<Dtype>(input->count(),      Dtype(0.), input->mutable_cpu_diff());
+  caffe_set<Dtype>(featswrt->count(),   Dtype(0.), featswrt->mutable_cpu_diff());
+  caffe_set<Dtype>(wspatial->count(),   Dtype(0.), wspatial->mutable_cpu_diff());
+  caffe_set<Dtype>(wbilateral->count(), Dtype(0.), wbilateral->mutable_cpu_diff());
+
+  caffe_set<Dtype>(spatial_out_blob_.count(), Dtype(0.), spatial_out_blob_.mutable_cpu_diff());
+  caffe_set<Dtype>(bilateral_out_blob_.count(), Dtype(0.), bilateral_out_blob_.mutable_cpu_diff());
+
   // ------------------------- Gradient w.r.t. kernels weights ------------
-  caffe_set(wspatial->count(),   Dtype(0.), wspatial->mutable_cpu_diff());
-  caffe_set(wbilateral->count(), Dtype(0.), wbilateral->mutable_cpu_diff());
 
   std::cout<<"========================= Backward_cpu: 1"<<std::endl;
 
@@ -285,7 +294,35 @@ void BilateralInterface<Dtype>::Backward_cpu(
                           wbilateral->mutable_cpu_diff());
   }
 
+  std::cout<<"spatial_out_blob_ "<<spatial_out_blob_.DebugStr()<<std::endl;
+  std::cout<<"bilateral_out_blob_ "<<bilateral_out_blob_.DebugStr()<<std::endl;
+
+  std::cout<<"input "<<input->DebugStr()<<std::endl;
+  std::cout<<"featswrt "<<featswrt->DebugStr()<<std::endl;
+  std::cout<<"wspatial "<<wspatial->DebugStr()<<std::endl;
+  std::cout<<"wbilateral "<<wbilateral->DebugStr()<<std::endl;
+  std::cout<<"output "<<output->DebugStr()<<std::endl;
+
+  std::cout<<"num_ == "<<num_
+           <<", channels_ == "<<channels_
+           <<", num_pixels_ == "<<num_pixels_
+           <<std::endl;
+
   std::cout<<"========================= Backward_cpu: 3"<<std::endl;
+
+  input->debug_visualize_buf_("backward-input");
+  featswrt->debug_visualize_buf_("backward-featswrt");
+  //wspatial->debug_visualize_buf_("backward-wspatial");
+  //wbilateral->debug_visualize_buf_("backward-wbilateral");
+  output->debug_visualize_buf_("backward-output");
+
+
+  input->debug_visualize_bufdiff_("backward-input-diff");
+  featswrt->debug_visualize_bufdiff_("backward-featswrt-diff");
+  //wspatial->debug_visualize_bufdiff_("backward-wspatial");
+  //wbilateral->debug_visualize_bufdiff_("backward-wbilateral");
+  output->debug_visualize_bufdiff_("backward-output-diff");
+
 
   /*Dtype* tmp = new Dtype[count_];
   caffe_mul<Dtype>(count_, output->cpu_diff(), spatial_out_blob_.cpu_data(), tmp);
