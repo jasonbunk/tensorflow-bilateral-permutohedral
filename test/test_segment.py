@@ -7,56 +7,16 @@ os.environ['CUDA_VISIBLE_DEVICES'] = ''
 import numpy as np
 import tensorflow as tf
 import cv2
+
 sys.path.insert(1, os.path.join(sys.path[0], '/mywork/tensorflow-tuts/sd19reader'))
 from myutils import describe
 
-#---------------------------------------------------------------------
-# load library
-path2file = os.path.dirname(os.path.realpath(__file__))
-builtlibpath_dir = os.path.join(path2file, '../build/lib')
-if False:
-    builtlibpath = os.path.join(builtlibpath_dir, 'libtfgaussiancrf.so')
-    libtfgaussiancrf = tf.load_op_library(builtlibpath)
-    print("-----------------------------------")
-    from inspect import getmembers, isfunction
-    functions_list = [o for o in getmembers(libtfgaussiancrf) if isfunction(o[1])]
-    print(str(functions_list))
-    print("-----------------------------------")
-    bilateral_filters = libtfgaussiancrf.bilateral_filters
-else:
-    sys.path.insert(1, os.path.join(sys.path[0], builtlibpath_dir))
-    import bilateral_op_and_grad
-    bilateral_filters = bilateral_op_and_grad.bilateral_filters
+from test_utils import *
+bilateral_filters = load_func_from_lib()
 
+path2file = os.path.dirname(os.path.realpath(__file__))
 #---------------------------------------------------------------------
 # setup a test
-
-def conv1x1(input, chansin, chansout, activation_fn, scopename="", bias=True):
-    chansin = int(chansin)
-    chansout = int(chansout)
-    with tf.variable_scope("conv1x1"+scopename) as scope:
-        initstdv = 1.1368468 * np.float32(1.0*np.sqrt(1.0/float(chansin+chansout)))
-        print("1x1conv: initstdv "+str(initstdv)+", chansin "+str(chansin)+", chansout "+str(chansout))
-        weights = tf.get_variable(shape=(1,1,chansin,chansout), initializer=tf.truncated_normal_initializer(stddev=initstdv), name='weights')
-        convresult = tf.nn.conv2d(input, weights, strides=[1,1,1,1], padding='VALID')
-        if bias:
-            biases = tf.get_variable(shape=(1,1,1,chansout), initializer=tf.constant_initializer(value=0), name='biases')
-            convresult += biases
-        if activation_fn is None:
-            return convresult
-        else:
-            return activation_fn(convresult)
-
-def NHWC_to_NCHW(arr):
-    try:
-        return tf.transpose(arr, perm=(0,3,1,2))
-    except:
-        return arr.transpose((0,3,1,2))
-def NCHW_to_NHWC(arr):
-    try:
-        return tf.transpose(arr, perm=(0,2,3,1))
-    except:
-        return arr.transpose((0,2,3,1))
 
 # cv2 image read shape: (height, width, channels)
 # tensorflow conv2d image shape: (batch, height, width, channels)
@@ -105,22 +65,17 @@ tfwbilateral = None
 if not useCRF:
     finalpred_logits = comp_class
 else:
-    npwspatial = np.expand_dims(np.expand_dims(np.eye(2),0),0).astype(np.float32)
-    npwbilateral = npwspatial.copy()
-
     crfprescale  = tf.get_variable('crfprescale', initializer=tf.constant(1.0))
-    tfwspatial   = tf.get_variable('tfwspatial',  initializer=tf.constant(npwspatial))
-    tfwbilateral = tf.get_variable('tfwbilateral',initializer=tf.constant(npwbilateral))
+    tfwspatial   = tf.get_variable('tfwspatial',  initializer=tf.constant(1.0))
+    tfwbilateral = tf.get_variable('tfwbilateral',initializer=tf.constant(1.0))
 
     reshcc = NHWC_to_NCHW(comp_class * crfprescale)
-    tf_x_nchw = NHWC_to_NCHW(tf_x_placehold)
-    almostpreds = bilateral_filters(input=reshcc, #input
-                                    featswrt=tf_x_nchw, #featswrt
-                                    wspatial=tfwspatial,
-                                    wbilateral=tfwbilateral,
-                                    stdv_spatial_space=10.0,
-                                    stdv_bilater_space=10.0)
-    finalpred_logits = NCHW_to_NHWC(almostpreds)
+    ret = bilateral_filters(input=reshcc, #input
+                            featswrt=NHWC_to_NCHW(tf_x_placehold), #featswrt
+                            stdv_spatial_space=10.0,
+                            stdv_bilater_space=10.0)
+    outspace, outbilat = ret
+    finalpred_logits = NCHW_to_NHWC(outspace * tfwspatial + outbilat * tfwbilateral)
 
 finalpred_softmax = tf.nn.softmax(finalpred_logits)
 total_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(finalpred_logits, tf_y_placehold))

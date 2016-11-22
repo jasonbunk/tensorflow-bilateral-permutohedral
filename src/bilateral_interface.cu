@@ -70,9 +70,8 @@ template <typename Dtype>
 void BilateralInterface<Dtype>::Forward_gpu(
        Blob<Dtype>* const input,
        Blob<Dtype>* const featswrt,
-       Blob<Dtype>* const wspatial,
-       Blob<Dtype>* const wbilateral,
-       Blob<Dtype>* const output) {
+       Blob<Dtype>* const out_spatial,
+       Blob<Dtype>* const out_bilateral) {
 
    if(init_cpu)
      LOG(FATAL) << ("You initialize your network on CPU, please initialize it on GPU.");
@@ -95,13 +94,10 @@ void BilateralInterface<Dtype>::Forward_gpu(
      CUDA_POST_KERNEL_CHECK;
    }
 
-  //------------------------------- Softmax normalization--------------------
-  //softmax_layer_->Forward(softmax_bottom_vec_, softmax_top_vec_);
-
   //-----------------------------------Message passing-----------------------
   for (int n = 0; n < num_; ++n) {
 
-    Dtype* spatial_out_data = spatial_out_blob_.mutable_gpu_data() + spatial_out_blob_.offset(n);
+    Dtype* spatial_out_data = out_spatial->mutable_gpu_data() + out_spatial->offset(n);
     const Dtype* prob_input_data = input->gpu_data() + input->offset(n);
 
     spatial_lattice_->compute(spatial_out_data, prob_input_data, channels_, false);
@@ -113,7 +109,7 @@ void BilateralInterface<Dtype>::Forward_gpu(
           spatial_out_data + channel_id * num_pixels_);
     }
 
-    Dtype* bilateral_out_data = bilateral_out_blob_.mutable_gpu_data() + bilateral_out_blob_.offset(n);
+    Dtype* bilateral_out_data = out_bilateral->mutable_gpu_data() + out_bilateral->offset(n);
 
     bilateral_lattices_[n]->compute(bilateral_out_data, prob_input_data, channels_, false);
     // Pixel-wise normalization.
@@ -123,32 +119,6 @@ void BilateralInterface<Dtype>::Forward_gpu(
           bilateral_out_data + channel_id * num_pixels_);
     }
   }
-
-  caffe_gpu_set(count_, Dtype(0.), output->mutable_gpu_data());
-
-  for (int n = 0; n < num_; ++n) {
-    caffe_gpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, channels_, num_pixels_, channels_, (Dtype) 1.,
-        wspatial->gpu_data(), spatial_out_blob_.gpu_data() + spatial_out_blob_.offset(n), (Dtype) 0.,
-        output->mutable_gpu_data() + output->offset(n));
-  }
-
-  for (int n = 0; n < num_; ++n) {
-    caffe_gpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, channels_, num_pixels_, channels_, (Dtype) 1.,
-        wbilateral->gpu_data(), bilateral_out_blob_.gpu_data() + bilateral_out_blob_.offset(n), (Dtype) 1.,
-        output->mutable_gpu_data() + output->offset(n));
-  }
-
-  //--------------------------- Compatibility multiplication ----------------
-  //Result from message passing needs to be multiplied with compatibility values.
-  //for (int n = 0; n < num_; ++n) {
-  //  caffe_gpu_gemm<Dtype>(CblasNoTrans, CblasNoTrans, channels_, num_pixels_,
-  //      channels_, (Dtype) 1., this->blobs_[2]->gpu_data(),
-  //      message_passing_.gpu_data() + message_passing_.offset(n), (Dtype) 0.,
-  //      pairwise_.mutable_gpu_data() + pairwise_.offset(n));
-  //}
-  //------------------------- Adding unaries, normalization is left to the next iteration --------------
-  // Add unary
-  //sum_layer_->Forward(sum_bottom_vec_, sum_top_vec_);
 }
 
 // instantiate float and double instances
@@ -158,12 +128,10 @@ template void BilateralInterface<double>::gpu_setup_normalize_spatial_norms(doub
 template void BilateralInterface<float>::Forward_gpu(
                             Blob<float>* const input,
                             Blob<float>* const featswrt,
-                            Blob<float>* const wspatial,
-                            Blob<float>* const wbilateral,
-                            Blob<float>* const output);
+                            Blob<float>* const out_spatial,
+                            Blob<float>* const out_bilateral);
 template void BilateralInterface<double>::Forward_gpu(
                             Blob<double>* const input,
                             Blob<double>* const featswrt,
-                            Blob<double>* const wspatial,
-                            Blob<double>* const wbilateral,
-                            Blob<double>* const output);
+                            Blob<double>* const out_spatial,
+                            Blob<double>* const out_bilateral);

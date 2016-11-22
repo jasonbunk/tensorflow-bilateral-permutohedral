@@ -10,23 +10,8 @@ import tensorflow as tf
 sys.path.insert(1, os.path.join(sys.path[0], '/mywork/tensorflow-tuts/sd19reader'))
 from myutils import describe
 
-#---------------------------------------------------------------------
-# load library
-path2file = os.path.dirname(os.path.realpath(__file__))
-builtlibpath_dir = os.path.join(path2file, '../build/lib')
-if False:
-    builtlibpath = os.path.join(builtlibpath_dir, 'libtfgaussiancrf.so')
-    libtfgaussiancrf = tf.load_op_library(builtlibpath)
-    print("-----------------------------------")
-    from inspect import getmembers, isfunction
-    functions_list = [o for o in getmembers(libtfgaussiancrf) if isfunction(o[1])]
-    print(str(functions_list))
-    print("-----------------------------------")
-    bilateral_filters = libtfgaussiancrf.bilateral_filters
-else:
-    sys.path.insert(1, os.path.join(sys.path[0], builtlibpath_dir))
-    import bilateral_op_and_grad
-    bilateral_filters = bilateral_op_and_grad.bilateral_filters
+from test_utils import *
+bilateral_filters = load_func_from_lib()
 
 #---------------------------------------------------------------------
 # setup a test
@@ -36,7 +21,7 @@ xshape      = [randint(2,6) for dim in range(4)]
 wrtshp    = xshape
 wrtshp[1] = randint(3,6) # num channels doesn't have to be same as xxx
 yshape      = xshape
-wshape = [1, 1, xshape[1], xshape[1]]
+wshape = [1,] #[1, 1, xshape[1], xshape[1]]
 
 myvars = {}
 myvars['xxx'] = xshape
@@ -55,12 +40,11 @@ for key in myvars:
 stdv_spatial_space = np.exp(uniform(-2.0, 2.0))
 stdv_bilater_space = np.exp(uniform(-2.0, 2.0))
 
-xfilt = bilateral_filters(input=myvars['xxx'][0],
+ret = bilateral_filters(input=myvars['xxx'][0],
                             featswrt=myvars['wrt'][0],
-                            wspatial=myvars['wsp'][0],
-                            wbilateral=myvars['wbi'][0],
                             stdv_spatial_space=stdv_spatial_space,
                             stdv_bilater_space=stdv_bilater_space)
+xfilt = (ret[0] * myvars['wsp'][0] + ret[1] * myvars['wsp'][1])
 
 errs = tf.square(xfilt - myvars['yyy'][0])
 loss = tf.reduce_mean(errs)
@@ -72,7 +56,7 @@ tf.initialize_all_variables().run()
 # grad_err = tf.test.compute_gradient_error(x, x_shape, y, y_shape)
 
 for ii in range(100):
-    print("\niter "+str(ii)+"\n")
+    print("---- iter "+str(ii))
     for key in myvars:
         try:
             grads = tf.test.compute_gradient(myvars[key][0], myvars[key][1],
@@ -95,3 +79,7 @@ for ii in range(100):
             describe(key+'_reldiff', grad_reld)
             #describe('    '+key+'_grads[0]',grads[0])
             #describe('    '+key+'_grads[1]',grads[1])
+
+            if np.mean(np.fabs(grad_reld)) > 0.05 or np.std(grad_reld) > 0.05:
+                print("\nWARNING: mean or stdv of relative gradient diff " \
+                     +"was > 5 % !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n")

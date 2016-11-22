@@ -22,8 +22,6 @@ class BilateralInterface {
   void OneTimeSetUp(
       Blob<Dtype>* const input,
       Blob<Dtype>* const featswrt,
-      Blob<Dtype>* const wspatial,
-      Blob<Dtype>* const wbilateral,
       float stdv_spatial_space,
       float stdv_bilateral_space);
 
@@ -33,16 +31,14 @@ class BilateralInterface {
   void Forward_cpu(
                 Blob<Dtype>* const input,
                 Blob<Dtype>* const featswrt,
-                Blob<Dtype>* const wspatial,
-                Blob<Dtype>* const wbilateral,
-                Blob<Dtype>* const output);
+                Blob<Dtype>* const out_spatial,
+                Blob<Dtype>* const out_bilateral);
 #ifndef CPU_ONLY
   void Forward_gpu(
                 Blob<Dtype>* const input,
                 Blob<Dtype>* const featswrt,
-                Blob<Dtype>* const wspatial,
-                Blob<Dtype>* const wbilateral,
-                Blob<Dtype>* const output);
+                Blob<Dtype>* const out_spatial,
+                Blob<Dtype>* const out_bilateral);
 #endif
 
   /**
@@ -51,9 +47,8 @@ class BilateralInterface {
   void Backward_cpu(
                 Blob<Dtype>* const input,
                 Blob<Dtype>* const featswrt,
-                Blob<Dtype>* const wspatial,
-                Blob<Dtype>* const wbilateral,
-                Blob<Dtype>* const output);
+                Blob<Dtype>* const out_spatial,
+                Blob<Dtype>* const out_bilateral);
 //#ifndef CPU_ONLY
 //  void Backward_gpu();
 //#endif
@@ -90,10 +85,6 @@ class BilateralInterface {
 
 
   Dtype* norm_feed_;
-
-  // outputs of spatial and bilateral filters, respectively
-  Blob<Dtype> spatial_out_blob_;
-  Blob<Dtype> bilateral_out_blob_;
 
   float* bilateral_kernel_buffer_;
   shared_ptr<caffe::ModifiedPermutohedral> spatial_lattice_;
