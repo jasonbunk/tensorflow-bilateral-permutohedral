@@ -1,3 +1,6 @@
 build
 .build_release
 *.pyc
+*.png
+*.jpg
+*.pkl

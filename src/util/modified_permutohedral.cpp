@@ -1,7 +1,7 @@
 //#include "stdafx.h"
 #include "modified_permutohedral.hpp"
 
-#ifdef __SSE__
+/*#ifdef __SSE__
 // SSE Permutoheral lattice
 # define SSE_PERMUTOHEDRAL
 #endif
@@ -12,7 +12,7 @@
 # ifdef __SSE4_1__
 #  include <smmintrin.h>
 # endif
-#endif
+#endif*/
 
 namespace caffe {
 /************************************************/
@@ -102,10 +102,14 @@ public:
 /***          ModifiedPermutohedral Lattice           ***/
 /************************************************/
 
-ModifiedPermutohedral::ModifiedPermutohedral(): is_init(false), N_( 0 ), M_( 0 ), d_( 0 ) {
-}
+template <typename Dtype>
+ModifiedPermutohedral<Dtype>::ModifiedPermutohedral(bool run_on_cpu) :
+		is_init(false), DEVICE_IS_CPU(run_on_cpu), matrix(nullptr), N_( 0 ), M_( 0 ), d_( 0 )
+{}
+
 #ifdef SSE_PERMUTOHEDRAL
-void ModifiedPermutohedral::init_cpu(const float* features, int num_dimensions, int num_points)
+template <typename Dtype>
+void ModifiedPermutohedral<Dtype>::init_cpu(const Dtype* features, int num_dimensions, int num_points)
 {
 	// Compute the lattice coordinates for each feature [there is going to be a lot of magic here
 	N_ = num_points;
@@ -288,7 +292,8 @@ void ModifiedPermutohedral::init_cpu(const float* features, int num_dimensions, 
 	delete[] n2;
 }
 #else
-void ModifiedPermutohedral::init_cpu(const float* features, int num_dimensions, int num_points)
+template <typename Dtype>
+void ModifiedPermutohedral<Dtype>::init_cpu(const Dtype* features, int num_dimensions, int num_points)
 {
 	// Compute the lattice coordinates for each feature [there is going to be a lot of magic here
 	N_ = num_points;
@@ -308,6 +313,8 @@ void ModifiedPermutohedral::init_cpu(const float* features, int num_dimensions, 
 	short * rank = new short[d_+1];
 	short * canonical = new short[(d_+1)*(d_+1)];
 	short * key = new short[d_+1];
+	int nextidx;
+	const int num_canonic = (d_+1)*(d_+1);
 
 	// Compute the canonical simplex
 	for( int i=0; i<=d_; i++ ){
@@ -326,7 +333,7 @@ void ModifiedPermutohedral::init_cpu(const float* features, int num_dimensions, 
 	// Compute the simplex each feature lies in
 	for( int k=0; k<N_; k++ ){
 		// Elevate the feature ( y = Ep, see p.5 in [Adams etal 2010])
-		const float * f = (feature + k * num_dimensions);
+		const float * f = (features + k * num_dimensions);
 
 		// sm contains the sum of 1..n of our faeture vector
 		float sm = 0;
@@ -387,16 +394,19 @@ void ModifiedPermutohedral::init_cpu(const float* features, int num_dimensions, 
 			barycentric[i] = 0;
 		for( int i=0; i<=d_; i++ ){
 			float v = (elevated[i] - rem0[i])*down_factor;
-			barycentric[d_-rank[i]  ] += v;
-			barycentric[d_-rank[i]+1] -= v;
+			nextidx = d_-rank[i];
+			if(nextidx >= 0 &&  nextidx < d_+2) {barycentric[nextidx  ] += v;}
+			if(nextidx >= -1 && nextidx < d_+1) {barycentric[nextidx+1] -= v;}
 		}
 		// Wrap around
 		barycentric[0] += 1.0 + barycentric[d_+1];
 
 		// Compute all vertices and their offset
 		for( int remainder=0; remainder<=d_; remainder++ ){
-			for( int i=0; i<d_; i++ )
-				key[i] = rem0[i] + canonical[ remainder*(d_+1) + rank[i] ];
+			for( int i=0; i<d_; i++ ) {
+				nextidx = remainder*(d_+1) + rank[i];
+				key[i] = (nextidx >= 0 && nextidx < num_canonic) ? (rem0[i] + canonical[nextidx]) : 0;
+			}
 			offset_[ k*(d_+1)+remainder ] = hash_table.find( key, true );
 			rank_[ k*(d_+1)+remainder ] = rank[remainder];
 			barycentric_[ k*(d_+1)+remainder ] = barycentric[ remainder ];
@@ -441,62 +451,9 @@ void ModifiedPermutohedral::init_cpu(const float* features, int num_dimensions, 
 	delete[] n2;
 }
 #endif
-void ModifiedPermutohedral::seqCompute(float* out, const float* in, int value_size, bool reverse, bool add) const
-{
-	// Shift all values by 1 such that -1 -> 0 (used for blurring)
-	float * values = new float[ (M_+2)*value_size ];
-	float * new_values = new float[ (M_+2)*value_size ];
 
-	for( int i=0; i<(M_+2)*value_size; i++ )
-		values[i] = new_values[i] = 0;
-
-	// Splatting
-	for( int i=0;  i<N_; i++ ){
-		for( int j=0; j<=d_; j++ ){
-			int o = offset_[i*(d_+1)+j]+1;
-			float w = barycentric_[i*(d_+1)+j];
-			for( int k=0; k<value_size; k++ )
-				values[ o*value_size+k ] += w * in[k*N_ + i];
-		}
-	}
-
-	for( int j=reverse?d_:0; j<=d_ && j>=0; reverse?j--:j++ ){
-		for( int i=0; i<M_; i++ ){
-			float * old_val = values + (i+1)*value_size;
-			float * new_val = new_values + (i+1)*value_size;
-
-			int n1 = blur_neighbors_[j*M_+i].n1+1;
-			int n2 = blur_neighbors_[j*M_+i].n2+1;
-			float * n1_val = values + n1*value_size;
-			float * n2_val = values + n2*value_size;
-			for( int k=0; k<value_size; k++ )
-				new_val[k] = old_val[k]+0.5*(n1_val[k] + n2_val[k]);
-		}
-		std::swap( values, new_values );
-	}
-	// Alpha is a magic scaling constant (write Andrew if you really wanna understand this)
-	float alpha = 1.0f / (1+powf(2, -d_));
-
-	// Slicing
-	for( int i=0; i<N_; i++ ){
-	  if (!add) {
-	    for( int k=0; k<value_size; k++ )
-	      out[i + k*N_] = 0; //out[i*value_size+k] = 0;
-	  }
-		for( int j=0; j<=d_; j++ ){
-			int o = offset_[i*(d_+1)+j]+1;
-			float w = barycentric_[i*(d_+1)+j];
-			for( int k=0; k<value_size; k++ )
-				//out[ i*value_size+k ] += w * values[ o*value_size+k ] * alpha;
-			  out[ i + k*N_ ] += w * values[ o*value_size+k ] * alpha;
-		}
-	}
-
-
-	delete[] values;
-	delete[] new_values;
-}
-void ModifiedPermutohedral::seqCompute(double* out, const double* in, int value_size, bool reverse, bool add) const
+template <typename Dtype>
+void ModifiedPermutohedral<Dtype>::seqCompute(Dtype* out, const Dtype* in, int value_size, bool reverse, bool add, int grad_chan) const
 {
   // Shift all values by 1 such that -1 -> 0 (used for blurring)
   float * values = new float[ (M_+2)*value_size ];
@@ -511,7 +468,7 @@ void ModifiedPermutohedral::seqCompute(double* out, const double* in, int value_
       int o = offset_[i*(d_+1)+j]+1;
       float w = barycentric_[i*(d_+1)+j];
       for( int k=0; k<value_size; k++ )
-        values[ o*value_size+k ] += w * static_cast<float>(in[k*N_ + i]);
+        values[ o*value_size+k ] += w * static_cast<Dtype>(in[k*N_ + i]);
     }
   }
 
@@ -524,8 +481,13 @@ void ModifiedPermutohedral::seqCompute(double* out, const double* in, int value_
       int n2 = blur_neighbors_[j*M_+i].n2+1;
       float * n1_val = values + n1*value_size;
       float * n2_val = values + n2*value_size;
-      for( int k=0; k<value_size; k++ )
-        new_val[k] = old_val[k]+0.5*(n1_val[k] + n2_val[k]);
+      for( int k=0; k<value_size; k++ ) {
+        if(j == grad_chan) {
+          new_val[k] =            0.5*(n1_val[k] - n2_val[k]);
+        } else {
+          new_val[k] = old_val[k]+0.5*(n1_val[k] + n2_val[k]);
+        }
+      }
     }
     std::swap( values, new_values );
   }
@@ -552,88 +514,11 @@ void ModifiedPermutohedral::seqCompute(double* out, const double* in, int value_
   delete[] new_values;
 }
 #ifdef SSE_PERMUTOHEDRAL
-void ModifiedPermutohedral::sseCompute ( float* out, const float* in, int value_size, const bool reverse, const bool add) const
+template <typename Dtype>
+void ModifiedPermutohedral<Dtype>::sseCompute( Dtype* out, const Dtype* in, int value_size, const bool reverse, const bool add, int grad_chan) const
 {
-	const int sse_value_size = (value_size-1)*sizeof(float) / sizeof(__m128) + 1;
-	// Shift all values by 1 such that -1 -> 0 (used for blurring)
-	__m128 * sse_val    = (__m128*) _mm_malloc( sse_value_size*sizeof(__m128), 16 );
-	__m128 * values     = (__m128*) _mm_malloc( (M_+2)*sse_value_size*sizeof(__m128), 16 );
-	__m128 * new_values = (__m128*) _mm_malloc( (M_+2)*sse_value_size*sizeof(__m128), 16 );
+	for(int ii=0; ii<10; ++ii) std::cout<<"WARNING: SSE????"<<std::endl;
 
-	__m128 Zero = _mm_set1_ps( 0 );
-
-	for( int i=0; i<(M_+2)*sse_value_size; i++ )
-		values[i] = new_values[i] = Zero;
-	for( int i=0; i<sse_value_size; i++ )
-		sse_val[i] = Zero;
-
-	float* sdp_temp = new float[value_size];
-
-	// Splatting
-	for( int i=0;  i<N_; i++ ){
-
-
-		for (int s = 0; s < value_size; s++) {
-		  sdp_temp[s] = in[s*N_ + i];
-		}
-		memcpy(sse_val, sdp_temp, value_size*sizeof(float));
-
-		for( int j=0; j<=d_; j++ ){
-			int o = offset_[i*(d_+1)+j]+1;
-			__m128 w = _mm_set1_ps( barycentric_[i*(d_+1)+j] );
-			for( int k=0; k<sse_value_size; k++ )
-				values[ o*sse_value_size+k ] += w * sse_val[k];
-		}
-	}
-	// Blurring
-	__m128 half = _mm_set1_ps(0.5);
-	for( int j=reverse?d_:0; j<=d_ && j>=0; reverse?j--:j++ ){
-		for( int i=0; i<M_; i++ ){
-			__m128 * old_val = values + (i+1)*sse_value_size;
-			__m128 * new_val = new_values + (i+1)*sse_value_size;
-
-			int n1 = blur_neighbors_[j*M_+i].n1+1;
-			int n2 = blur_neighbors_[j*M_+i].n2+1;
-			__m128 * n1_val = values + n1*sse_value_size;
-			__m128 * n2_val = values + n2*sse_value_size;
-			for( int k=0; k<sse_value_size; k++ )
-				new_val[k] = old_val[k]+half*(n1_val[k] + n2_val[k]);
-		}
-		std::swap( values, new_values );
-	}
-	// Alpha is a magic scaling constant (write Andrew if you really wanna understand this)
-	float alpha = 1.0f / (1+powf(2, -d_));
-
-	// Slicing
-	for( int i=0; i<N_; i++ ){
-		for( int k=0; k<sse_value_size; k++ )
-			sse_val[ k ] = Zero;
-		for( int j=0; j<=d_; j++ ){
-			int o = offset_[i*(d_+1)+j]+1;
-			__m128 w = _mm_set1_ps( barycentric_[i*(d_+1)+j] * alpha );
-			for( int k=0; k<sse_value_size; k++ )
-				sse_val[ k ] += w * values[ o*sse_value_size+k ];
-		}
-
-		memcpy(sdp_temp, sse_val, value_size*sizeof(float) );
-    if (!add) {
-      for (int s = 0; s < value_size; s++) {
-        out[i + s*N_] = sdp_temp[s];
-      }
-    } else {
-      for (int s = 0; s < value_size; s++) {
-        out[i + s*N_] += sdp_temp[s];
-      }
-    }
-	}
-
-	_mm_free( sse_val );
-	_mm_free( values );
-	_mm_free( new_values );
-	delete[] sdp_temp;
-}
-void ModifiedPermutohedral::sseCompute ( double* out, const double* in, int value_size, const bool reverse, const bool add) const
-{
   const int sse_value_size = (value_size-1)*sizeof(float) / sizeof(__m128) + 1;
   // Shift all values by 1 such that -1 -> 0 (used for blurring)
   __m128 * sse_val    = (__m128*) _mm_malloc( sse_value_size*sizeof(__m128), 16 );
@@ -654,7 +539,7 @@ void ModifiedPermutohedral::sseCompute ( double* out, const double* in, int valu
 
 
     for (int s = 0; s < value_size; s++) {
-      sdp_temp[s] = static_cast<float>(in[s*N_ + i]);
+      sdp_temp[s] = static_cast<Dtype>(in[s*N_ + i]);
     }
     memcpy(sse_val, sdp_temp, value_size*sizeof(float));
 
@@ -714,31 +599,26 @@ void ModifiedPermutohedral::sseCompute ( double* out, const double* in, int valu
   delete[] sdp_temp;
 }
 #else
-void ModifiedPermutohedral::sseCompute( float* out, const float* in, int value_size, bool reverse, bool add) const
+template <typename Dtype>
+void ModifiedPermutohedral<Dtype>::sseCompute(Dtype* out, const Dtype* in, int value_size, bool reverse, bool add, int grad_chan) const
 {
-	seqCompute( out, in, value_size, reverse, add);
-}
-void ModifiedPermutohedral::sseCompute(double* out, const double* in, int value_size, bool reverse, bool add) const
-{
-  seqCompute( out, in, value_size, reverse, add);
+  seqCompute( out, in, value_size, reverse, add, grad_chan);
 }
 #endif
 
-
-void ModifiedPermutohedral::compute_cpu (float* out, const float* in, int value_size, bool reverse, bool add) const
-{
-	if (value_size <= 2)
-		seqCompute(out, in, value_size, reverse, add);
-	else
-		sseCompute(out, in, value_size, reverse, add);
-}
-
-void ModifiedPermutohedral::compute_cpu (double* out, const double* in, int value_size, bool reverse, bool add) const
+template <typename Dtype>
+void ModifiedPermutohedral<Dtype>::compute_cpu (Dtype* out, const Dtype* in, int value_size, bool reverse, bool add, int grad_chan) const
 {
   if (value_size <= 2)
-    seqCompute(out, in, value_size, reverse, add);
+    seqCompute(out, in, value_size, reverse, add, grad_chan);
   else
-    sseCompute(out, in, value_size, reverse, add);
+    sseCompute(out, in, value_size, reverse, add, grad_chan);
 }
+
+
+/*	Compile certain expected uses of ModifiedPermutohedral.
+	  Will cause "undefined reference" errors if you use a type not defined here.
+*/
+template class ModifiedPermutohedral<float>;
 
 }

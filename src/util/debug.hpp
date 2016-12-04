@@ -3,6 +3,7 @@
 
 #include <string>
 #include <iomanip>
+#include <sstream>
 
 
 template <class T>

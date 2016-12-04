@@ -19,6 +19,7 @@ typedef struct MatrixEntry {
   float weight;
 } MatrixEntry;
 
+template <typename Dtype>
 class ModifiedPermutohedral
 {
 protected:
@@ -30,6 +31,7 @@ protected:
 
 	// Check if GPU hash table if initialize
 	bool is_init;
+  const bool DEVICE_IS_CPU;
 
 	std::vector<int> offset_, rank_;
 	std::vector<float> barycentric_;
@@ -42,28 +44,16 @@ protected:
 	// Number of elements, size of sparse discretized space, dimension of features width and height
 	int N_, M_, d_, w_, h_;
 
-	void init_cpu(const float* features, int num_dimensions, int num_points);
-	void init_gpu(const float* features, int num_dimensions, int w, int h);
+	void init_cpu(const Dtype* features, int num_dimensions, int num_points);
+	void init_gpu(const Dtype* features, int num_dimensions, int w, int h);
 
-	void compute_cpu(float* out, const float* in, int value_size, bool reverse = false, bool add = false) const;
-	void compute_cpu(double* out, const double* in, int value_size, bool reverse = false, bool add = false) const;
-
-	void compute_gpu(float* out, const float* in, int value_size, bool reverse = false, bool add = false) const;
-	void compute_gpu(double* out, const double* in, int value_size, bool reverse = false, bool add = false) const;
-
-	void sseCompute(float* out, const float* in, int value_size, bool reverse = false, bool add = false) const;
-  void sseCompute(double* out, const double* in, int value_size, bool reverse = false, bool add = false) const;
-
-	void seqCompute(float* out, const float* in, int value_size, bool reverse = false, bool add = false) const;
-	void seqCompute(double* out, const double* in, int value_size, bool reverse = false, bool add = false) const;
+	void compute_cpu(Dtype* out, const Dtype* in, int value_size, bool reverse = false, bool add = false, int grad_chan = -1) const;
+	void compute_gpu(Dtype* out, const Dtype* in, int value_size, bool reverse = false, bool add = false, int grad_chan = -1) const;
+  void sseCompute(Dtype* out, const Dtype* in, int value_size, bool reverse = false, bool add = false, int grad_chan = -1) const;
+	void seqCompute(Dtype* out, const Dtype* in, int value_size, bool reverse = false, bool add = false, int grad_chan = -1) const;
 
 public:
-	ModifiedPermutohedral();
-/*
-	void init (const float* features, int num_dimensions, int num_points);
-	void compute(float* out, const float* in, int value_size, bool reverse = false, bool add = false) const;
-	void compute(double* out, const double* in, int value_size, bool reverse = false, bool add = false) const;
-*/
+	ModifiedPermutohedral(bool run_on_cpu);
 
   ~ModifiedPermutohedral(){
   #ifndef CPU_ONLY
@@ -72,47 +62,27 @@ public:
   #endif
   }
 
-  void init (const float* features, int num_dimensions, int w, int h){
-    switch (Caffe::mode()) {
-      case Caffe::CPU:
+  void init(const Dtype* features, int num_dimensions, int w, int h){
+    if(DEVICE_IS_CPU) {
         init_cpu(features, num_dimensions, w*h);
-        break;
-      #ifndef CPU_ONLY
-      case Caffe::GPU:
+    } else {
+      #ifdef CPU_ONLY
+        LOG(FATAL) << "Told to init for GPU but device was CPU";
+      #else
         init_gpu(features, num_dimensions, w, h);
         is_init = true;
-        break;
       #endif
-      default:
-        LOG(FATAL) << "Unknown caffe mode.";
     }
   }
-  void compute(float* out, const float* in, int value_size, bool reverse = false, bool add = false) const{
-    switch (Caffe::mode()) {
-      case Caffe::CPU:
-        compute_cpu(out, in, value_size, reverse, add);
-        break;
-      #ifndef CPU_ONLY
-      case Caffe::GPU:
-        compute_gpu(out, in, value_size, reverse, add);
-        break;
+  void compute(Dtype* out, const Dtype* in, int value_size, bool reverse = false, bool add = false, int grad_chan = -1) const{
+    if(DEVICE_IS_CPU) {
+        compute_cpu(out, in, value_size, reverse, add, grad_chan);
+    } else {
+      #ifdef CPU_ONLY
+        LOG(FATAL) << "Told to compute for GPU but device was CPU";
+      #else
+        compute_gpu(out, in, value_size, reverse, add, grad_chan);
       #endif
-      default:
-        LOG(FATAL) << "Unknown caffe mode.";
-    }
-  }
-  void compute(double* out, const double* in, int value_size, bool reverse = false, bool add = false) const{
-    switch (Caffe::mode()) {
-      case Caffe::CPU:
-        compute_cpu(out, in, value_size, reverse, add);
-        break;
-      #ifndef CPU_ONLY
-      case Caffe::GPU:
-        compute_gpu(out, in, value_size, reverse, add);
-        break;
-      #endif
-      default:
-        LOG(FATAL) << "Unknown caffe mode.";
     }
   }
 

@@ -5,7 +5,7 @@
 
 #include "common.hpp"
 #include "math_functions.hpp"
-#include "rng.hpp"
+//#include "rng.hpp"
 
 namespace caffe {
 
@@ -82,6 +82,7 @@ void caffe_add_scalar(const int N, const double alpha, double* Y) {
   }
 }
 
+/*
 template <typename Dtype>
 void caffe_copy(const int N, const Dtype* X, Dtype* Y) {
   if (X != Y) {
@@ -97,12 +98,12 @@ void caffe_copy(const int N, const Dtype* X, Dtype* Y) {
     }
   }
 }
-
 template void caffe_copy<int>(const int N, const int* X, int* Y);
 template void caffe_copy<unsigned int>(const int N, const unsigned int* X,
     unsigned int* Y);
 template void caffe_copy<float>(const int N, const float* X, float* Y);
 template void caffe_copy<double>(const int N, const double* X, double* Y);
+*/
 
 template <>
 void caffe_scal<float>(const int N, const float alpha, float *X) {
@@ -226,9 +227,9 @@ void caffe_abs<double>(const int n, const double* a, double* y) {
     vdAbs(n, a, y);
 }
 
-unsigned int caffe_rng_rand() {
-  return (*caffe_rng())();
-}
+//unsigned int caffe_rng_rand() {
+//  return (*caffe_rng())();
+//}
 
 template <typename Dtype>
 Dtype caffe_nextafter(const Dtype b) {
@@ -242,6 +243,7 @@ float caffe_nextafter(const float b);
 template
 double caffe_nextafter(const double b);
 
+/*
 template <typename Dtype>
 void caffe_rng_uniform(const int n, const Dtype a, const Dtype b, Dtype* r) {
   CHECK_GE(n, 0);
@@ -324,6 +326,7 @@ void caffe_rng_bernoulli<double>(const int n, const double p, unsigned int* r);
 
 template
 void caffe_rng_bernoulli<float>(const int n, const float p, unsigned int* r);
+*/
 
 template <>
 float caffe_cpu_strided_dot<float>(const int n, const float* x, const int incx,

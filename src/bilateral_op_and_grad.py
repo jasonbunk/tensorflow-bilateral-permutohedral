@@ -35,8 +35,8 @@ def bilateral_filters( input,
   """
   with ops.name_scope(name, "BilateralFilters") as name:
     # process inputs
-    #input    = ops.convert_to_tensor(input,    name="input")
-    #featswrt = ops.convert_to_tensor(featswrt, name="featswrt")
+    input    = ops.convert_to_tensor(input,    name="input")
+    featswrt = ops.convert_to_tensor(featswrt, name="featswrt")
     stdv_spatial_space = float(stdv_spatial_space)
     stdv_bilater_space = float(stdv_bilater_space)
     # call using loaded .so

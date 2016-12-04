@@ -56,19 +56,21 @@ class BilateralInterface {
   void compute_spatial_kernel(float* const output_kernel);
   void compute_bilateral_kernel(const Blob<Dtype>* const rgb_blob, const int n, float* const output_kernel);
 
-  explicit BilateralInterface() : count_(0),
-                                  num_(0),
-                                  channels_(0),
-                                  height_(0),
-                                  width_(0),
-                                  num_pixels_(0),
-                                  wrt_chans_(0),
-                                  init_cpu(false), init_gpu(false),
-                                  norm_feed_(nullptr),
-                                  bilateral_kernel_buffer_(nullptr) {}
+  explicit BilateralInterface(bool run_on_cpu) : count_(0),
+                                          num_(0),
+                                          channels_(0),
+                                          height_(0),
+                                          width_(0),
+                                          num_pixels_(0),
+                                          wrt_chans_(0),
+                                          has_been_initialized(false),
+                                          DEVICE_IS_CPU(run_on_cpu),
+                                          norm_feed_(nullptr),
+                                          bilateral_kernel_buffer_(nullptr) {}
   ~BilateralInterface() {freebilateralbuffer();}
 
  protected:
+   explicit BilateralInterface() : DEVICE_IS_CPU(false) {LOG(FATAL);}
   void OneTimeSetUp_KnownShapes();
   void freebilateralbuffer();
   void gpu_setup_normalize_spatial_norms(Dtype* norm_data);
@@ -87,15 +89,14 @@ class BilateralInterface {
   int wrt_chans_;
 
   // which device was it initialized on?
-  bool init_cpu;
-  bool init_gpu;
-
+  bool has_been_initialized;
+  const bool DEVICE_IS_CPU;
 
   Dtype* norm_feed_;
 
   float* bilateral_kernel_buffer_;
-  shared_ptr<caffe::ModifiedPermutohedral> spatial_lattice_;
-  vector<shared_ptr<caffe::ModifiedPermutohedral> > bilateral_lattices_;
+  shared_ptr<caffe::ModifiedPermutohedral<Dtype> > spatial_lattice_;
+  vector<shared_ptr< caffe::ModifiedPermutohedral<Dtype> > > bilateral_lattices_;
 
   Blob<Dtype> spatial_norm_;
   Blob<Dtype> bilateral_norms_;

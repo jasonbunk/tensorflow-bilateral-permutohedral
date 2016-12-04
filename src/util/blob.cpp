@@ -1,29 +1,85 @@
 #include "blob.hpp"
 #include "tensorflow/core/framework/tensor.h"
 #include "common.hpp" // GPU/CPU modes, cuda utils
-#include "debug.hpp" // DebugStr utils
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/highgui/highgui.hpp>
 
+#define BUF_CODE_TENS 0
+#define BUF_CODE_CPU 1
+#define BUF_CODE_GPU 2
+
 
 template <typename Dtype>
-void Blob<Dtype>::DataFrom(tensorflow::Tensor const*const input) {
-    CHECK(input != nullptr && fromTFtensor == false && buf_ == nullptr) <<
-            "cant DataFrom() when Blob is already attached to a tf::Tensor!";
+void Blob<Dtype>::DataFrom_c(tensorflow::Tensor const*const input) {
+    CHECK(input != nullptr && fromTFtensor == false && !buf_.assigned()) <<
+            "cant DataFrom_c() when Blob is already attached to a tf::Tensor!";
     fromTFtensor = true;
     const int ndims = input->dims();
     shape_.resize(ndims);
     for(int ii=0; ii<ndims; ++ii) {
         shape_[ii] = (int)input->dim_size(ii);
     }
-    buf_ = (Dtype*)input->tensor_data().data();
     ResetShapes();
     CHECK_EQ(num_axes(), 4) << "input must be 4-tensor!";
+
+#if 1
+    buf_.c_assign((Dtype const*const)input->tensor_data().data());
+    //buf_.c_assign(input->flat<Dtype>().data());
+#else
+    Dtype * temp = new Dtype[count()];
+    buf_.c_assign(temp); // DEBUGGGGGGGGGGGGGGGGGG
+    for(int ii=0; ii<count(); ++ii) {temp[ii] = (Dtype)(rand()%1000);}
+#endif
+}
+template <typename Dtype>
+void Blob<Dtype>::DataFrom_m(tensorflow::Tensor * input) {
+    CHECK(input != nullptr && !buf_.assigned_m()) <<
+                        "cant assign mutable data twice!";
+    if(buf_.assigned()) {
+        CHECK(fromTFtensor) << "cant assign tensor if already allocated";
+    }
+    fromTFtensor = true;
+    const int ndims = input->dims();
+    shape_.resize(ndims);
+    for(int ii=0; ii<ndims; ++ii) {
+        shape_[ii] = (int)input->dim_size(ii);
+    }
+    ResetShapes();
+    CHECK_EQ(num_axes(), 4) << "input must be 4-tensor!";
+
+#if 1
+    buf_.m_assign((Dtype *)input->tensor_data().data(), BUF_CODE_TENS);
+    //buf_.m_assign(input->flat<Dtype>().data(), BUF_CODE_TENS);
+#else
+    Dtype * temp = new Dtype[count()];
+    buf_.m_assign(temp, BUF_CODE_TENS); // DEBUGGGGGGGGGGGGGGGGGG
+    for(int ii=0; ii<count(); ++ii) {temp[ii] = (Dtype)(rand()%1000);}
+#endif
 }
 
 template <typename Dtype>
+void Blob<Dtype>::DiffFrom_c(tensorflow::Tensor const*const input) {
+    CHECK(input != nullptr &&
+	buf_.assigned() && !bufdiff_.assigned() && fromTFtensor) <<
+        "DiffFrom_c should be called no more than once, " <<
+        "and after already attached to a tf::Tensor!";
+    bufdiff_.c_assign((Dtype const*const)input->tensor_data().data());
+    //bufdiff_.c_assign(input->flat<Dtype>().data());
+}
+template <typename Dtype>
+void Blob<Dtype>::DiffFrom_m(tensorflow::Tensor * input) {
+    CHECK(input != nullptr &&
+	buf_.assigned() && !bufdiff_.assigned() && fromTFtensor) <<
+        "DiffFrom_m should be called no more than once, " <<
+        "and after already attached to a tf::Tensor!";
+    bufdiff_.m_assign((Dtype *)input->tensor_data().data(), BUF_CODE_TENS);
+    //bufdiff_.m_assign(input->flat<Dtype>().data(), BUF_CODE_TENS);
+}
+
+
+template <typename Dtype>
 void Blob<Dtype>::ShapeFrom(tensorflow::TensorShape const*const input) {
-    CHECK(input != nullptr && fromTFtensor == false && buf_ == nullptr) <<
+    CHECK(input != nullptr && fromTFtensor == false && !buf_.assigned()) <<
             "cant ShapeFrom() when Blob is already attached to a tf::Tensor!";
     const int ndims = input->dims();
     shape_.resize(ndims);
@@ -35,93 +91,74 @@ void Blob<Dtype>::ShapeFrom(tensorflow::TensorShape const*const input) {
 }
 
 template <typename Dtype>
-void Blob<Dtype>::assign_diff_buf(tensorflow::Tensor const*const input) {
-    CHECK(input != nullptr &&
-	buf_ != nullptr && bufdiff_ == nullptr && fromTFtensor) <<
-        "assign_diff_buf should be called no more than once, " <<
-        "and after already attached to a tf::Tensor!";
-    bufdiff_ = (Dtype*)input->tensor_data().data();
-}
-
-template <typename Dtype>
-void Blob<Dtype>::alloc_diff_buf() {
-    CHECK(buf_ != nullptr && fromTFtensor == false) <<
+void Blob<Dtype>::alloc_diff_buf(bool DEVICE_IS_CPU) {
+    CHECK(buf_.assigned() && fromTFtensor == false) <<
         "alloc_diff_buf should be called after buf_ is already allocated!"
         <<"\nAlso, cannot have been attached to a tensor!";
-    if(bufdiff_ != nullptr) {return;}
+    if(bufdiff_.assigned()) {return;}
 #ifdef CPU_ONLY
-        bufdiff_ = new Dtype[count()];
+    if(!DEVICE_IS_CPU) {LOG(FATAL) << "cant use gpu alloc_diff_buf on cpu";}
+    bufdiff_.m_assign(new Dtype[count()], BUF_CODE_CPU);
 #else
-    if(caffe::Caffe::mode() == caffe::Caffe::GPU) {
-        CUDA_CHECK(cudaMalloc((void**)&bufdiff_, count() * sizeof(Dtype)));
+    if(DEVICE_IS_CPU) {
+        bufdiff_.m_assign(new Dtype[count()], BUF_CODE_CPU);
     } else {
-        bufdiff_ = new Dtype[count()];
+        Dtype * temp;
+        CUDA_CHECK(cudaMalloc((void**)&temp, count() * sizeof(Dtype)));
+        bufdiff_.m_assign(temp, BUF_CODE_GPU);
     }
 #endif
 }
 
 template <typename Dtype>
-void Blob<Dtype>::alloc(int batch, int chans, int rows, int cols) {
-    if(caffe::Caffe::mode() == caffe::Caffe::GPU) {
-        gpu_alloc(batch, chans, rows, cols);
-    } else {
+void Blob<Dtype>::alloc(int batch, int chans, int rows, int cols,
+                        bool DEVICE_IS_CPU) {
+    if(DEVICE_IS_CPU) {
         cpu_alloc(batch, chans, rows, cols);
+    } else {
+        gpu_alloc(batch, chans, rows, cols);
     }
 }
 
 template <typename Dtype>
 void Blob<Dtype>::free_data() {
     if(fromTFtensor == false) {
-#ifdef CPU_ONLY
-        if(buf_     != nullptr) {delete[] buf_;}
-        if(bufdiff_ != nullptr) {delete[] bufdiff_;}
-#else
-        if(buf_ != nullptr) {
-            if(caffe::Caffe::mode() == caffe::Caffe::GPU) {
-                CUDA_CHECK(cudaFree(buf_));
-            } else {
-                delete[] buf_;
-            }
-        }
-        if(bufdiff_ != nullptr) {
-            if(caffe::Caffe::mode() == caffe::Caffe::GPU) {
-                CUDA_CHECK(cudaFree(bufdiff_));
-            } else {
-                delete[] bufdiff_;
-            }
-        }
-#endif
+        buf_.try_delete();
+        bufdiff_.try_delete();
     }
-    buf_ = nullptr;
-    bufdiff_ = nullptr;
+    buf_.set_null();
+    bufdiff_.set_null();
+    fromTFtensor = false;
 }
 
 template <typename Dtype>
 void Blob<Dtype>::cpu_alloc(int batch, int chans, int rows, int cols) {
-    CHECK(fromTFtensor == false && buf_ == nullptr) <<
+    CHECK(fromTFtensor == false && !buf_.assigned() && !bufdiff_.assigned()) <<
             "cant cpu_alloc() when Blob is already attached to a tf::Tensor!";
     shape_.resize(4);
     shape_[0] = batch;
     shape_[1] = chans;
     shape_[2] = rows;
     shape_[3] = cols;
-    buf_ = new Dtype[batch*chans*rows*cols];
+    buf_.m_assign(new Dtype[batch*chans*rows*cols], BUF_CODE_CPU);
     ResetShapes();
 }
 
 template <typename Dtype>
 void Blob<Dtype>::gpu_alloc(int batch, int chans, int rows, int cols) {
-    CHECK(fromTFtensor == false && buf_ == nullptr) <<
+    CHECK(fromTFtensor == false && !buf_.assigned() && !bufdiff_.assigned()) <<
             "cant gpu_alloc() when Blob is already attached to a tf::Tensor!";
 #ifdef CPU_ONLY
-    assert(0);
+    LOG(FATAL) << "cant use gpu_alloc on cpu";
 #else
     shape_.resize(4);
     shape_[0] = batch;
     shape_[1] = chans;
     shape_[2] = rows;
     shape_[3] = cols;
-    CUDA_CHECK(cudaMalloc((void**)&buf_, batch*chans*rows*cols*sizeof(Dtype)));
+    Dtype* temp;
+    CUDA_CHECK(cudaMalloc((void**)&temp, batch*chans*rows*cols*sizeof(Dtype)));
+    buf_.m_assign(temp, BUF_CODE_GPU);
     ResetShapes();
 #endif
 }
@@ -139,8 +176,8 @@ std::string Blob<Dtype>::DebugStr() {
         if(ii > 0) {retstr += std::string(", ");}
         retstr += to_istring(shape(ii));
     }
-    retstr += std::string("], buf_ = ") + to_sstring(buf_)
-            + std::string(", bufdiff_ = ")+to_sstring(bufdiff_)
+    retstr += std::string("], buf_ = ") +  buf_.str_representation()
+            + std::string(", bufdiff_ = ")+bufdiff_.str_representation()
             + std::string(", count() = ")+to_istring(count())
             + std::string(", fromTFtensor = ")+to_istring(fromTFtensor);
     return retstr;
@@ -148,18 +185,18 @@ std::string Blob<Dtype>::DebugStr() {
 
 template <typename Dtype>
 void Blob<Dtype>::debug_visualize_buf_(std::string wname) {
-    debug_visualize(wname, buf_);
+    debug_visualize(wname, buf_.c_data());
 }
 template <typename Dtype>
 void Blob<Dtype>::debug_visualize_bufdiff_(std::string wname) {
-    debug_visualize(wname, bufdiff_);
+    debug_visualize(wname, bufdiff_.c_data());
 }
 
 #define MINOF2(x,y) ((x)<(y)?(x):(y))
 #define MAXOF2(x,y) ((x)>(y)?(x):(y))
 
 template <typename Dtype>
-void Blob<Dtype>::debug_visualize(std::string wname, Dtype* thebuf) {
+void Blob<Dtype>::debug_visualize(std::string wname, Dtype const*const thebuf) {
   CHECK_EQ(num_axes(), 4);
   const int nbatch = shape(0);
   const int nchans = MINOF2(shape(1),3);

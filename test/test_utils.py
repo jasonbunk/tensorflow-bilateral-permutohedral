@@ -20,26 +20,63 @@ def load_func_from_lib():
         bilateral_filters = bilateral_op_and_grad.bilateral_filters
     return bilateral_filters
 
-def conv1x1(input, chansin, chansout, activation_fn, scopename="", bias=True):
+def load_4channel_truth_img(filepath):
+    import cv2
+    # cv2 image read shape: (height, width, channels)
+    # tensorflow conv2d image shape: (batch, height, width, channels)
+    fullim4ch = cv2.imread(filepath,cv2.IMREAD_UNCHANGED).astype(np.float32) / 255.0
+    assert len(fullim4ch.shape) == 3 and fullim4ch.shape[2] == 4
+
+    train_x = fullim4ch[:,:,:3]
+    trainy1 = fullim4ch[:,:,3]
+    train_x = train_x.reshape([1,]+list(train_x.shape)) # 4 channels: NHWC
+    trainy1 = trainy1.reshape([1,]+list(trainy1.shape)) # 3 channels: NHW
+    # make one-hot labels
+    train_y = np.zeros(list(trainy1.shape)+[2,], dtype=np.float32)
+    train_y[:,:,:,0] = 1.0 - trainy1
+    train_y[:,:,:,1] = trainy1
+    return train_x, train_y
+
+def conv1x1(input, chansin, chansout, activation_fn, scopename="", bias=True,
+            weights_init_value=None, bias_init_value=None):
     chansin = int(chansin)
     chansout = int(chansout)
     with tf.variable_scope("conv1x1"+scopename) as scope:
         initstdv = 1.1368468 * np.float32(1.0*np.sqrt(1.0/float(chansin+chansout)))
         print("1x1conv: initstdv "+str(initstdv) \
                 +", chansin "+str(chansin)+", chansout "+str(chansout))
-        weights = tf.get_variable(shape=(1,1,chansin,chansout),
-                        initializer=tf.truncated_normal_initializer(stddev=initstdv),
+        if weights_init_value is not None:
+            wshape = None
+            weightinit = tf.constant(weights_init_value)
+        else:
+            wshape = (1,1,chansin,chansout)
+            weightinit = tf.truncated_normal_initializer(stddev=initstdv)
+        weights = tf.get_variable(shape=wshape,
+                        initializer=weightinit,
                         name='weights')
         convresult = tf.nn.conv2d(input, weights, strides=[1,1,1,1], padding='VALID')
         if bias:
-            biases = tf.get_variable(shape=(1,1,1,chansout),
-                                initializer=tf.constant_initializer(value=0),
+            if bias_init_value is not None:
+                bshape = None
+                biasinit = tf.constant(bias_init_value)
+            else:
+                bshape = (1,1,1,chansout)
+                biasinit = tf.constant_initializer(value=0)
+            biases = tf.get_variable(shape=bshape,
+                                initializer=biasinit,
                                 name='biases')
             convresult += biases
         if activation_fn is None:
             return convresult
         else:
             return activation_fn(convresult)
+
+def np_2channel_to_3channel(arr, chanidx):
+    chanidx = int(chanidx)
+    assert(arr.shape[chanidx] == 2)
+    arrsh = [int(arr.shape[ii]) for ii in range(len(arr.shape))]
+    arrsh[chanidx] = 1
+    return np.concatenate((arr,np.zeros(arrsh,dtype=arr.dtype)),axis=chanidx)
 
 # supports numpy arrays and tensorflow tensors
 def NHWC_to_NCHW(arr):

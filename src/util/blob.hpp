@@ -4,6 +4,7 @@
 #include <vector>
 #include <iostream>
 #include <assert.h>
+#include "debug.hpp" // DebugStr utils
 
 // if no c++11
 #ifndef nullptr
@@ -15,26 +16,87 @@ class TensorShape;
 class Tensor;
 }
 
+template <typename Dtype>
+class ptr_const_or_mutable {
+public:
+    ptr_const_or_mutable() : unknown_cpu_gpu(0), cptr(nullptr), mptr(nullptr) {}
+    /*ptr_const_or_mutable(Dtype const*const init) : cptr(init), mptr(nullptr) {}
+    ptr_const_or_mutable& operator=(Dtype const*const someptr) {
+        cptr = someptr;
+        mptr = nullptr;
+    }*/
+
+    void c_assign(Dtype const*const someptr) {
+        cptr = someptr;
+        mptr = nullptr;
+    }
+    void m_assign(Dtype * someptr, uint8_t unknown_cpu_gpu_) {
+        unknown_cpu_gpu = unknown_cpu_gpu_;
+        cptr = mptr = someptr;
+    }
+    void set_null() {
+        cptr = mptr = nullptr;
+    }
+
+    inline bool assigned()   const {return cptr != nullptr || mptr != nullptr;}
+    inline bool assigned_m() const {return mptr != nullptr;}
+
+    Dtype const*const c_data() const {if(cptr==nullptr){std::cout<<"WARNING: c_data nullptr"<<std::endl;} return cptr;}
+    Dtype      *      m_data() const {if(mptr==nullptr){std::cout<<"WARNING: m_data nullptr"<<std::endl;} return mptr;}
+
+    std::string str_representation() const {return std::string("c")+to_sstring(cptr)+std::string(", m")+to_sstring(mptr);}
+
+    void try_delete() {
+        if(mptr != nullptr) {
+            if(unknown_cpu_gpu == 1) {
+                delete[] mptr;
+            }
+#ifdef CPU_ONLY
+            else if(unknown_cpu_gpu >= 2) {
+                std::cout<<"cant be gpu in cpu_only mode"<<std::endl; assert(0);
+            }
+#else
+            else if(unknown_cpu_gpu >= 2) {
+                CUDA_CHECK(cudaFree(mptr));
+            }
+#endif
+        }
+        cptr = mptr = nullptr;
+        unknown_cpu_gpu = 0;
+    }
+
+private:
+    uint8_t unknown_cpu_gpu; // 0 = unknown, 1 = cpu, 2 = gpu
+    const Dtype* cptr;
+          Dtype* mptr;
+};
+
+//----------------------------------------------------------------------------
+
 #define BLOBCONSTRDEFAULTS  shape_1(0),   \
                             shape_2(0),   \
                             shape_3(0),   \
                             shape_23(0),  \
                             shape_123(0), \
                             count_(0),    \
-                            fromTFtensor(false), \
-                            buf_(nullptr), bufdiff_(nullptr)
+                            fromTFtensor(false)
 
 template <typename Dtype>
 class Blob {
 public:
     Blob() : BLOBCONSTRDEFAULTS {}
-    Blob(tensorflow::TensorShape const*const input) : BLOBCONSTRDEFAULTS {ShapeFrom(input);}
-    Blob(tensorflow::Tensor const*const input)      : BLOBCONSTRDEFAULTS {DataFrom(input);}
-    Blob(int batch, int chans, int rows, int cols)  : BLOBCONSTRDEFAULTS {alloc(batch, chans, rows, cols);}
+    Blob(tensorflow::TensorShape const*const input)    : BLOBCONSTRDEFAULTS {ShapeFrom(input);}
+    Blob(tensorflow::Tensor const*const input)         : BLOBCONSTRDEFAULTS {DataFrom_c(input);}
+    Blob(int batch,int chans,int rows,int cols,bool dev):BLOBCONSTRDEFAULTS {alloc(batch,chans,rows,cols,dev);}
 
-    void DataFrom(tensorflow::Tensor const*const input);
+    void DataFrom_c(tensorflow::Tensor const*const input);
+    void DataFrom_m(tensorflow::Tensor * input);
+
+    void DiffFrom_c(tensorflow::Tensor const*const input);
+    void DiffFrom_m(tensorflow::Tensor * input);
+
     void ShapeFrom(tensorflow::TensorShape const*const input);
-    void alloc(int batch, int chans, int rows, int cols);
+    void alloc(int batch, int chans, int rows, int cols, bool DEVICE_IS_CPU);
     void free_data();
     std::string DebugStr();
     void debug_visualize_buf_(std::string wname);
@@ -56,10 +118,10 @@ public:
     inline int width() const { return shape_3; }
 
     // NCHW
-    int offset(int n,int c,int h,int w) const { return ((n * shape_1 + c) * shape_2 + h) * shape_3 + w; }
-    int offset(int n,int c,int h)       const { return ((n * shape_1 + c) * shape_2 + h) * shape_3;     }
-    int offset(int n,int c)             const { return  (n * shape_1 + c) * shape_23;                   }
-    int offset(int n)                   const { return   n * shape_123;                                 }
+    inline int offset(int n,int c,int h,int w) const { return ((n * shape_1 + c) * shape_2 + h) * shape_3 + w; }
+    inline int offset(int n,int c,int h)       const { return ((n * shape_1 + c) * shape_2 + h) * shape_3;     }
+    inline int offset(int n,int c)             const { return  (n * shape_1 + c) * shape_23;                   }
+    inline int offset(int n)                   const { return   n * shape_123;                                 }
 
 /*  // NHWC
     int offset(int n,int h,int w,int c) const { return ((n * shape_1 + h) * shape_2 + w) * shape_3 + c; }
@@ -68,23 +130,22 @@ public:
     int offset(int n)                   const { return   n * shape_123;                                 }
 */
 
-    Dtype const*const cpu_data() const {return buf_;}
-    Dtype * mutable_cpu_data()         {return buf_;}
-    Dtype const*const gpu_data() const {return buf_;}
-    Dtype * mutable_gpu_data()         {return buf_;}
+    Dtype const*const cpu_data() const {return buf_.c_data();}
+    Dtype const*const gpu_data() const {return buf_.c_data();}
+    Dtype * mutable_cpu_data()   const {return buf_.m_data();}
+    Dtype * mutable_gpu_data()   const {return buf_.m_data();}
 
-    Dtype const*const cpu_diff() const {return bufdiff_;}
-    Dtype * mutable_cpu_diff()         {return bufdiff_;}
-    Dtype const*const gpu_diff() const {return bufdiff_;}
-    Dtype * mutable_gpu_diff()         {return bufdiff_;}
+    Dtype const*const cpu_diff() const {return bufdiff_.c_data();}
+    Dtype const*const gpu_diff() const {return bufdiff_.c_data();}
+    Dtype * mutable_cpu_diff()   const {return bufdiff_.m_data();}
+    Dtype * mutable_gpu_diff()   const {return bufdiff_.m_data();}
 
-    void alloc_diff_buf();
-    void assign_diff_buf(tensorflow::Tensor const*const input);
+    void alloc_diff_buf(bool DEVICE_IS_CPU);
 
-    void Reshape(int batch, int chans, int rows, int cols) {
+    void Reshape(int batch, int chans, int rows, int cols, bool DEVICE_IS_CPU) {
         assert(fromTFtensor == false);
-        if(buf_ == nullptr) {
-            alloc(batch, chans, rows, cols);
+        if(!buf_.assigned()) {
+            alloc(batch, chans, rows, cols, DEVICE_IS_CPU);
         } else {
             if(batch*rows*cols*chans != count()) {
                 std::cout<<"@@@@@@@@@@@@@@@@@@@@ FATAL ERROR: blob::Reshape(): "
@@ -95,7 +156,7 @@ public:
     }
 
 private:
-    void debug_visualize(std::string wname, Dtype* thebuf);
+    void debug_visualize(std::string wname, Dtype const*const thebuf);
     void cpu_alloc(int batch, int chans, int rows, int cols);
     void gpu_alloc(int batch, int chans, int rows, int cols);
     void ResetShapes() {
@@ -115,9 +176,9 @@ private:
     int count_;
     bool fromTFtensor;
     std::vector<int> shape_;
-    Dtype* buf_; // not refcounted; it's assumed these come from a Tensor object
+    ptr_const_or_mutable<Dtype> buf_; // not refcounted; it's assumed these come from a Tensor object
                  // which is already refcounted
-    Dtype* bufdiff_;
+    ptr_const_or_mutable<Dtype> bufdiff_;
 };
 
 #endif

@@ -32,7 +32,7 @@ void BilateralInterface<Dtype>::OneTimeSetUp(
     float stdv_spatial_space,
     float stdv_bilateral_space) {
 
-  if(init_cpu != false || init_gpu != false) {
+  if(has_been_initialized) {
       bool good = true;
       // filter standard deviations
       good = good && (theta_alpha_ == stdv_bilateral_space);
@@ -49,8 +49,7 @@ void BilateralInterface<Dtype>::OneTimeSetUp(
       if(good) return;
       else {
         freebilateralbuffer();
-        init_cpu = false;
-        init_gpu = false;
+        has_been_initialized = false;
       }
   }
 
@@ -80,12 +79,12 @@ void BilateralInterface<Dtype>::OneTimeSetUp(
  */
 template <typename Dtype>
 void BilateralInterface<Dtype>::OneTimeSetUp_KnownShapes() {
-  CHECK(init_cpu == false && init_gpu == false) << "Dont initialize twice!!";
+  CHECK(has_been_initialized == false) << "Dont initialize twice!!";
 
   // Initialize the spatial lattice. This does not need to be computed for every image because we use a fixed size.
-  float spatial_kernel[2 * num_pixels_];
+  float spatial_kernel[2*num_pixels_];
   compute_spatial_kernel(spatial_kernel);
-  spatial_lattice_.reset(new ModifiedPermutohedral());
+  spatial_lattice_.reset(new ModifiedPermutohedral<Dtype>(DEVICE_IS_CPU));
   freebilateralbuffer();
 
 #ifndef CPU_ONLY
@@ -93,11 +92,10 @@ void BilateralInterface<Dtype>::OneTimeSetUp_KnownShapes() {
   Dtype* norm_data_gpu = nullptr;
 #endif
 
-  spatial_norm_.Reshape(1, 1, height_, width_);
+  spatial_norm_.Reshape(1, 1, height_, width_, DEVICE_IS_CPU);
   Dtype* norm_data = nullptr;
   // Initialize the spatial lattice. This does not need to be computed for every image because we use a fixed size.
-  switch (Caffe::mode()) {
-    case Caffe::CPU:
+  if(DEVICE_IS_CPU) {
       norm_data = spatial_norm_.mutable_cpu_data();
       spatial_lattice_->init(spatial_kernel, 2, width_, height_);
       // Calculate spatial filter normalization factors.
@@ -108,10 +106,10 @@ void BilateralInterface<Dtype>::OneTimeSetUp_KnownShapes() {
         norm_data[i] = 1.0f / (norm_data[i] + 1e-20f);
       }
       bilateral_kernel_buffer_ = new float[wrt_chans_ * num_pixels_];
-      init_cpu = true;
-      break;
-    #ifndef CPU_ONLY
-    case Caffe::GPU:
+  } else {
+#ifdef CPU_ONLY
+      LOG(FATAL) << "Told to initialize for GPU but compiled with CPU_ONLY!!!!!!";
+#else
       CUDA_CHECK(cudaMalloc((void**)&spatial_kernel_gpu_, 2*num_pixels_ * sizeof(float)));
       CUDA_CHECK(cudaMemcpy(spatial_kernel_gpu_, spatial_kernel, 2*num_pixels_ * sizeof(float), cudaMemcpyHostToDevice));
       spatial_lattice_->init(spatial_kernel_gpu_, 2, width_, height_);
@@ -122,16 +120,14 @@ void BilateralInterface<Dtype>::OneTimeSetUp_KnownShapes() {
       gpu_setup_normalize_spatial_norms(norm_data_gpu);
       CUDA_CHECK(cudaMalloc((void**)&bilateral_kernel_buffer_, wrt_chans_ * num_pixels_ * sizeof(float)));
       CUDA_CHECK(cudaFree(spatial_kernel_gpu_));
-      init_gpu = true;
-      break;
-    #endif
-    default:
-    LOG(FATAL) << "Unknown caffe mode.";
+#endif
   }
 
   // Allocate space for bilateral kernels. This is a temporary buffer used to compute bilateral lattices later.
   // Also allocate space for holding bilateral filter normalization values.
-  bilateral_norms_.Reshape(num_, 1, height_, width_);
+  bilateral_norms_.Reshape(num_, 1, height_, width_, DEVICE_IS_CPU);
+
+  has_been_initialized = true;
 }
 
 /**
@@ -149,7 +145,7 @@ void BilateralInterface<Dtype>::Forward_cpu(
   for (int n = 0; n < num_; ++n) {
 
     compute_bilateral_kernel(featswrt, n, bilateral_kernel_buffer_);
-    bilateral_lattices_[n].reset(new ModifiedPermutohedral());
+    bilateral_lattices_[n].reset(new ModifiedPermutohedral<Dtype>(DEVICE_IS_CPU));
     bilateral_lattices_[n]->init(bilateral_kernel_buffer_, wrt_chans_, width_, height_);
 
     // Calculate bilateral filter normalization factors.
@@ -202,7 +198,7 @@ void BilateralInterface<Dtype>::Backward_cpu(
   for (int n = 0; n < num_; ++n) {
 
     compute_bilateral_kernel(featswrt, n, bilateral_kernel_buffer_);
-    bilateral_lattices_[n].reset(new ModifiedPermutohedral());
+    bilateral_lattices_[n].reset(new ModifiedPermutohedral<Dtype>(DEVICE_IS_CPU));
     bilateral_lattices_[n]->init(bilateral_kernel_buffer_, wrt_chans_, width_, height_);
 
     // Calculate bilateral filter normalization factors.
@@ -246,27 +242,27 @@ void BilateralInterface<Dtype>::Backward_cpu(
 
 template<typename Dtype>
 void BilateralInterface<Dtype>::freebilateralbuffer() {
-  if(bilateral_kernel_buffer_ != NULL) {
-    if(init_cpu){
+  if(bilateral_kernel_buffer_ != nullptr) {
+    if(DEVICE_IS_CPU) {
         delete[] bilateral_kernel_buffer_;
-        bilateral_kernel_buffer_ = NULL;
+        bilateral_kernel_buffer_ = nullptr;
     }
   #ifndef CPU_ONLY
-    if(init_gpu){
+    else {
         CUDA_CHECK(cudaFree(bilateral_kernel_buffer_));
-        bilateral_kernel_buffer_ = NULL;
+        bilateral_kernel_buffer_ = nullptr;
     }
   #endif
   }
-  if(norm_feed_ != NULL) {
-    if(init_cpu){
+  if(norm_feed_ != nullptr) {
+    if(DEVICE_IS_CPU) {
         delete[] norm_feed_;
-        norm_feed_ = NULL;
+        norm_feed_ = nullptr;
     }
   #ifndef CPU_ONLY
-    if(init_gpu){
+    else {
         CUDA_CHECK(cudaFree(norm_feed_));
-        norm_feed_ = NULL;
+        norm_feed_ = nullptr;
     }
   #endif
   }
@@ -275,7 +271,6 @@ void BilateralInterface<Dtype>::freebilateralbuffer() {
 template<typename Dtype>
 void BilateralInterface<Dtype>::compute_bilateral_kernel(const Blob<Dtype>* const rgb_blob, const int n,
                                                                float* const output_kernel) {
-
   for (int p = 0; p < num_pixels_; ++p) {
     output_kernel[wrt_chans_ * p] = static_cast<float>(p % width_) / theta_alpha_;
     output_kernel[wrt_chans_ * p + 1] = static_cast<float>(p / width_) / theta_alpha_;
@@ -289,7 +284,6 @@ void BilateralInterface<Dtype>::compute_bilateral_kernel(const Blob<Dtype>* cons
 
 template <typename Dtype>
 void BilateralInterface<Dtype>::compute_spatial_kernel(float* const output_kernel) {
-
   for (int p = 0; p < num_pixels_; ++p) {
     output_kernel[2*p] = static_cast<float>(p % width_) / theta_gamma_;
     output_kernel[2*p + 1] = static_cast<float>(p / width_) / theta_gamma_;
@@ -316,4 +310,4 @@ void BilateralInterface<Dtype>::Backward_gpu(
 	  Will cause "undefined reference" errors if you use a type not defined here.
 */
 template class BilateralInterface<float>;
-template class BilateralInterface<double>;
+//template class BilateralInterface<double>;

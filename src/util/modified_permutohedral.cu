@@ -41,6 +41,9 @@ __global__ static void createMatrix(const int w, const int h,
   float myElevated[pd+1];
   const float *myPosition = positions + idx*pd;
 
+  int nextidx;
+  const float down_factor = (1.0f/(pd+1));
+
   int myGreedy[pd+1];
   int myRank[pd+1];
 
@@ -114,9 +117,10 @@ __global__ static void createMatrix(const int w, const int h,
     }
 
     for (int i = 0; i <= pd; i++) {
-      float delta = (myElevated[i] - myGreedy[i]) * (1.0f/(pd+1));
-      myBarycentric[pd-myRank[i]] += delta;
-      myBarycentric[pd+1-myRank[i]] -= delta;
+      float delta = (myElevated[i] - myGreedy[i]) * down_factor;
+      nextidx = pd-myRank[i];
+      if(nextidx >=  0 && nextidx < pd+2) myBarycentric[nextidx  ] += delta;
+      if(nextidx >= -1 && nextidx < pd+1) myBarycentric[nextidx+1] -= delta;
     }
     myBarycentric[0] += 1.0f + myBarycentric[pd+1];
   }
@@ -258,7 +262,8 @@ __global__ static void blur(int n, float *newValues,
     const int table_capacity,
     float *table_values,
     int color,
-    const int vd)
+    const int vd,
+    const int grad_chan)
 {
   const int idx = (blockIdx.y * gridDim.x + blockIdx.x) * blockDim.x * blockDim.y + threadIdx.x;
 
@@ -290,21 +295,43 @@ __global__ static void blur(int n, float *newValues,
   float *valNm = table_values + (vd+1)*offNm;
   float *valOut = newValues + (vd+1)*idx;
 
-  if (offNp >= 0 && offNm >= 0) {
-    for (int i = 0; i <= vd; i++) {
-      valOut[i] = (valNp[i] + (valMe[i]*2) + valNm[i])/2;
-    }
-  } else if (offNp >= 0) {
-    for (int i = 0; i <= vd; i++) {
-      valOut[i] = (valNp[i] + (valMe[i]*2))/2;
-    }
-  } else if (offNm >= 0) {
-    for (int i = 0; i <= vd; i++) {
-      valOut[i] = (valNm[i] + (valMe[i]*2))/2;
+  if(color != grad_chan) {
+    // ordinary blurring
+    if (offNp >= 0 && offNm >= 0) {
+      for (int i = 0; i <= vd; i++) {
+        valOut[i] = (valNp[i] + (valMe[i]*2) + valNm[i])/2;
+      }
+    } else if (offNp >= 0) {
+      for (int i = 0; i <= vd; i++) {
+        valOut[i] = (valNp[i] + (valMe[i]*2))/2;
+      }
+    } else if (offNm >= 0) {
+      for (int i = 0; i <= vd; i++) {
+        valOut[i] = (valNm[i] + (valMe[i]*2))/2;
+      }
+    } else {
+      for (int i = 0; i <= vd; i++) {
+        valOut[i] = valMe[i];
+      }
     }
   } else {
-    for (int i = 0; i <= vd; i++) {
-      valOut[i] = valMe[i];
+    // directional gradient (using approx. first derivative of Gaussian)
+    if (offNp >= 0 && offNm >= 0) {
+      for (int i = 0; i <= vd; i++) {
+        valOut[i] = (valNp[i] - valNm[i])/2;
+      }
+    } else if (offNp >= 0) {
+      for (int i = 0; i <= vd; i++) {
+        valOut[i] = (valNp[i])/2;
+      }
+    } else if (offNm >= 0) {
+      for (int i = 0; i <= vd; i++) {
+        valOut[i] = (-valNm[i])/2;
+      }
+    } else {
+      for (int i = 0; i <= vd; i++) {
+        valOut[i] = 0;
+      }
     }
   }
 }
@@ -409,7 +436,7 @@ template<int pd, typename Dtype>
 void gpu_compute(Dtype* out, const Dtype* in, const HashTable &table,
   const MatrixEntry* matrix,
   int w, int h, int vd,
-  bool reverse, bool add){
+  bool reverse, bool add, int grad_chan) {
 
   // Create table_values
   int num_points = w*h ;
@@ -445,7 +472,8 @@ void gpu_compute(Dtype* out, const Dtype* in, const HashTable &table,
      table.table_capacity,
      table_values,
      color,
-     vd);
+     vd,
+     grad_chan);
     CUDA_POST_KERNEL_CHECK;
     // swap pointers does not seem to work...
     swapHashTableValues(oldValues, newValues, table_values, size);
@@ -475,6 +503,7 @@ void ModifiedPermutohedral::init_gpu(const float* features, int num_dimensions, 
   d_ = num_dimensions ;
   N_ = w*h ;
   switch(num_dimensions){
+    case 1: gpu_init<1>(features, &table, matrix, w_, h_); break;
     case 2: gpu_init<2>(features, &table, matrix, w_, h_); break;
     case 3: gpu_init<3>(features, &table, matrix, w_, h_); break;
     case 4: gpu_init<4>(features, &table, matrix, w_, h_); break;
@@ -483,17 +512,19 @@ void ModifiedPermutohedral::init_gpu(const float* features, int num_dimensions, 
     case 7: gpu_init<7>(features, &table, matrix, w_, h_); break;
     case 8: gpu_init<8>(features, &table, matrix, w_, h_); break;
     default:
-      LOG(FATAL) << "num_dimensions should be between 2 and 8";
+      LOG(FATAL) << "num_dimensions should be between 1 and 8";
   }
 }
 
-#define BUILDTEMPL_GPU_COMPUTE(numdims,dtype) case numdims: gpu_compute<numdims,dtype>(out, in, table, matrix, w_, h_, value_size, reverse, add); break
+#define BUILDTEMPL_GPU_COMPUTE(numdims,dtype) \
+  case numdims: gpu_compute<numdims,dtype>(out, in, table, matrix, w_, h_, value_size, reverse, add, grad_chan); break
 
-void ModifiedPermutohedral::compute_gpu(float* out, const float* in, int value_size, bool reverse, bool add) const {
+void ModifiedPermutohedral::compute_gpu(float* out, const float* in, int value_size, bool reverse, bool add, int grad_chan) const {
   // Losing time by dynamically allocating memory but more general function
   if(!is_init)
     LOG(FATAL) << "Initialize lattice before doing any computing";
   switch(d_){
+    BUILDTEMPL_GPU_COMPUTE(1,float);
     BUILDTEMPL_GPU_COMPUTE(2,float);
     BUILDTEMPL_GPU_COMPUTE(3,float);
     BUILDTEMPL_GPU_COMPUTE(4,float);
@@ -502,15 +533,16 @@ void ModifiedPermutohedral::compute_gpu(float* out, const float* in, int value_s
     BUILDTEMPL_GPU_COMPUTE(7,float);
     BUILDTEMPL_GPU_COMPUTE(8,float);
     default:
-      LOG(FATAL) << "num_dimensions should be between 2 and 8";
+      LOG(FATAL) << "num_dimensions should be between 1 and 8";
   }
 }
 
-void ModifiedPermutohedral::compute_gpu(double* out, const double* in, int value_size, bool reverse, bool add) const {
+void ModifiedPermutohedral::compute_gpu(double* out, const double* in, int value_size, bool reverse, bool add, int grad_chan) const {
   // Losing time by dynamically allocating memory but more general function
   if(!is_init)
     LOG(FATAL) << "Initialize lattice before doing any computing";
   switch(d_){
+    BUILDTEMPL_GPU_COMPUTE(1,double);
     BUILDTEMPL_GPU_COMPUTE(2,double);
     BUILDTEMPL_GPU_COMPUTE(3,double);
     BUILDTEMPL_GPU_COMPUTE(4,double);
@@ -519,7 +551,7 @@ void ModifiedPermutohedral::compute_gpu(double* out, const double* in, int value
     BUILDTEMPL_GPU_COMPUTE(7,double);
     BUILDTEMPL_GPU_COMPUTE(8,double);
     default:
-      LOG(FATAL) << "num_dimensions should be between 2 and 8";
+      LOG(FATAL) << "num_dimensions should be between 1 and 8";
   }
 }
 

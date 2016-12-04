@@ -73,7 +73,7 @@ void BilateralInterface<Dtype>::Forward_gpu(
        Blob<Dtype>* const out_spatial,
        Blob<Dtype>* const out_bilateral) {
 
-   if(init_cpu) {
+   if(DEVICE_IS_CPU) {
       std::cout<<"You initialize your network on CPU, please initialize it on GPU."<<std::endl;
    }
    const Dtype* bottom_data = featswrt->gpu_data();
@@ -129,7 +129,7 @@ void BilateralInterface<Dtype>::Backward_gpu(
         Blob<Dtype>* const out_spatial,
         Blob<Dtype>* const out_bilateral) {
 
-   if(init_cpu) {
+   if(DEVICE_IS_CPU) {
      std::cout<<"You initialize your network on CPU, please initialize it on GPU."<<std::endl;
    }
    const Dtype* bottom_data = featswrt->gpu_data();
