@@ -5,7 +5,7 @@
 
 #include "common.hpp"
 #include "math_functions.hpp"
-//#include "rng.hpp"
+#include "rng.hpp"
 
 namespace caffe {
 

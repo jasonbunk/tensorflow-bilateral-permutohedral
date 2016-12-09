@@ -4,9 +4,7 @@
 #include <ctime>
 
 #include "common.hpp"
-//#include "rng.hpp"
-
-#if 0
+#include "rng.hpp"
 
 namespace caffe {
 
@@ -314,7 +312,3 @@ const char* curandGetErrorString(curandStatus_t error) {
 #endif  // CPU_ONLY
 
 }  // namespace caffe
-
-
-
-#endif

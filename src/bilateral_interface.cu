@@ -73,6 +73,9 @@ void BilateralInterface<Dtype>::Forward_gpu(
        Blob<Dtype>* const out_spatial,
        Blob<Dtype>* const out_bilateral) {
 
+   const int GRADCHAN = -1; // DEBUGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG
+   //spatial_lattice_->grad_init(2); // DEBUGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG
+
    if(DEVICE_IS_CPU) {
       std::cout<<"You initialize your network on CPU, please initialize it on GPU."<<std::endl;
    }
@@ -85,7 +88,7 @@ void BilateralInterface<Dtype>::Forward_gpu(
          theta_alpha_, n,
          bilateral_kernel_buffer_, wrt_chans_);
      CUDA_POST_KERNEL_CHECK;
-     bilateral_lattices_[n].reset(new ModifiedPermutohedral());
+     bilateral_lattices_[n].reset(new ModifiedPermutohedral<Dtype>(DEVICE_IS_CPU));
      bilateral_lattices_[n]->init(bilateral_kernel_buffer_, wrt_chans_, width_, height_);
      // Calculate bilateral filter normalization factors.
      Dtype* norm_output_data = bilateral_norms_.mutable_gpu_data() + bilateral_norms_.offset(n);
@@ -100,7 +103,7 @@ void BilateralInterface<Dtype>::Forward_gpu(
     Dtype* spatial_out_data = out_spatial->mutable_gpu_data() + out_spatial->offset(n);
     const Dtype* prob_input_data = input->gpu_data() + input->offset(n);
 
-    spatial_lattice_->compute(spatial_out_data, prob_input_data, channels_, false);
+    spatial_lattice_->compute(spatial_out_data, prob_input_data, channels_, false, false, GRADCHAN);
 
     // Pixel-wise normalization.
     for (int channel_id = 0; channel_id < channels_; ++channel_id) {
@@ -142,7 +145,7 @@ void BilateralInterface<Dtype>::Backward_gpu(
          theta_alpha_, n,
          bilateral_kernel_buffer_, wrt_chans_);
      CUDA_POST_KERNEL_CHECK;
-     bilateral_lattices_[n].reset(new ModifiedPermutohedral());
+     bilateral_lattices_[n].reset(new ModifiedPermutohedral<Dtype>(DEVICE_IS_CPU));
      bilateral_lattices_[n]->init(bilateral_kernel_buffer_, wrt_chans_, width_, height_);
      // Calculate bilateral filter normalization factors.
      Dtype* norm_output_data = bilateral_norms_.mutable_gpu_data() + bilateral_norms_.offset(n);
@@ -157,7 +160,7 @@ void BilateralInterface<Dtype>::Backward_gpu(
   for (int n = 0; n < num_; ++n) {
 
     // BP thru normalization
-    Dtype *spatial_out_diff = out_spatial->mutable_gpu_diff() + out_spatial->offset(n);
+    Dtype *spatial_out_diff = out_spatial->gpu_diff() + out_spatial->offset(n);
     for (int channel_id = 0; channel_id < channels_; ++channel_id) {
       caffe_gpu_mul(num_pixels_, spatial_norm_.gpu_data(),
                 spatial_out_diff + channel_id * num_pixels_,
@@ -169,7 +172,7 @@ void BilateralInterface<Dtype>::Backward_gpu(
                               channels_, true, false);
 
     // BP thru normalization
-    Dtype *bilateral_out_diff = out_bilateral->mutable_gpu_diff() + out_bilateral->offset(n);
+    Dtype *bilateral_out_diff = out_bilateral->gpu_diff() + out_bilateral->offset(n);
     for (int channel_id = 0; channel_id < channels_; ++channel_id) {
       caffe_gpu_mul(num_pixels_, bilateral_norms_.gpu_data() + bilateral_norms_.offset(n),
                 bilateral_out_diff + channel_id * num_pixels_,
@@ -186,26 +189,26 @@ void BilateralInterface<Dtype>::Backward_gpu(
 
 // instantiate float and double instances
 template void BilateralInterface<float>::gpu_setup_normalize_spatial_norms(float* norm_data);
-template void BilateralInterface<double>::gpu_setup_normalize_spatial_norms(double* norm_data);
+//template void BilateralInterface<double>::gpu_setup_normalize_spatial_norms(double* norm_data);
 
 template void BilateralInterface<float>::Forward_gpu(
                             Blob<float>* const input,
                             Blob<float>* const featswrt,
                             Blob<float>* const out_spatial,
                             Blob<float>* const out_bilateral);
-template void BilateralInterface<double>::Forward_gpu(
-                            Blob<double>* const input,
-                            Blob<double>* const featswrt,
-                            Blob<double>* const out_spatial,
-                            Blob<double>* const out_bilateral);
+//template void BilateralInterface<double>::Forward_gpu(
+//                            Blob<double>* const input,
+//                            Blob<double>* const featswrt,
+//                            Blob<double>* const out_spatial,
+//                            Blob<double>* const out_bilateral);
 
 template void BilateralInterface<float>::Backward_gpu(
                             Blob<float>* const input,
                             Blob<float>* const featswrt,
                             Blob<float>* const out_spatial,
                             Blob<float>* const out_bilateral);
-template void BilateralInterface<double>::Backward_gpu(
-                            Blob<double>* const input,
-                            Blob<double>* const featswrt,
-                            Blob<double>* const out_spatial,
-                            Blob<double>* const out_bilateral);
+//template void BilateralInterface<double>::Backward_gpu(
+//                            Blob<double>* const input,
+//                            Blob<double>* const featswrt,
+//                            Blob<double>* const out_spatial,
+//                            Blob<double>* const out_bilateral);

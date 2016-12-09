@@ -3,10 +3,32 @@
 #include "common.hpp" // GPU/CPU modes, cuda utils
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/highgui/highgui.hpp>
+#include "device_alternate.hpp"
 
 #define BUF_CODE_TENS 0
 #define BUF_CODE_CPU 1
 #define BUF_CODE_GPU 2
+
+
+template <typename Dtype>
+void ptr_const_or_mutable<Dtype>::try_delete() {
+    if(mptr != nullptr) {
+        if(unknown_cpu_gpu == BUF_CODE_CPU) {
+            delete[] mptr;
+        }
+#ifdef CPU_ONLY
+        else if(unknown_cpu_gpu == BUF_CODE_GPU) {
+            std::cout<<"cant be gpu in cpu_only mode"<<std::endl; assert(0);
+        }
+#else
+        else if(unknown_cpu_gpu == BUF_CODE_GPU) {
+            CUDA_CHECK(cudaFree(mptr));
+        }
+#endif
+    }
+    cptr = mptr = nullptr;
+    unknown_cpu_gpu = 0;
+}
 
 
 template <typename Dtype>
@@ -233,5 +255,7 @@ void Blob<Dtype>::debug_visualize(std::string wname, Dtype const*const thebuf) {
 /*	Compile certain expected uses of Blob.
 	Will cause "undefined reference" errors if you use a type not defined here.
 */
+template class ptr_const_or_mutable<float>;
+template class ptr_const_or_mutable<double>;
 template class Blob<float>;
 template class Blob<double>;

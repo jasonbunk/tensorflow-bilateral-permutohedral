@@ -140,6 +140,9 @@ void BilateralInterface<Dtype>::Forward_cpu(
         Blob<Dtype>* const out_spatial,
         Blob<Dtype>* const out_bilateral) {
 
+const int GRADCHAN = -1; // DEBUGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG
+  //spatial_lattice_->grad_init(2); // DEBUGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG
+
   // Initialize the bilateral lattices.
   bilateral_lattices_.resize(num_);
   for (int n = 0; n < num_; ++n) {
@@ -147,6 +150,7 @@ void BilateralInterface<Dtype>::Forward_cpu(
     compute_bilateral_kernel(featswrt, n, bilateral_kernel_buffer_);
     bilateral_lattices_[n].reset(new ModifiedPermutohedral<Dtype>(DEVICE_IS_CPU));
     bilateral_lattices_[n]->init(bilateral_kernel_buffer_, wrt_chans_, width_, height_);
+    //bilateral_lattices_[n]->grad_init(wrt_chans_); // DEBUGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG
 
     // Calculate bilateral filter normalization factors.
     Dtype* norm_output_data = bilateral_norms_.mutable_cpu_data() + bilateral_norms_.offset(n);
@@ -162,7 +166,7 @@ void BilateralInterface<Dtype>::Forward_cpu(
     Dtype* spatial_out_data = out_spatial->mutable_cpu_data() + out_spatial->offset(n);
     const Dtype* prob_input_data = input->cpu_data() + input->offset(n);
 
-    spatial_lattice_->compute(spatial_out_data, prob_input_data, channels_, false);
+    spatial_lattice_->compute(spatial_out_data, prob_input_data, channels_, false, false, GRADCHAN);
 
     // Pixel-wise normalization.
     for (int channel_id = 0; channel_id < channels_; ++channel_id) {
@@ -200,6 +204,7 @@ void BilateralInterface<Dtype>::Backward_cpu(
     compute_bilateral_kernel(featswrt, n, bilateral_kernel_buffer_);
     bilateral_lattices_[n].reset(new ModifiedPermutohedral<Dtype>(DEVICE_IS_CPU));
     bilateral_lattices_[n]->init(bilateral_kernel_buffer_, wrt_chans_, width_, height_);
+//    bilateral_lattices_[n]->grad_init(wrt_chans_);
 
     // Calculate bilateral filter normalization factors.
     Dtype* norm_output_data = bilateral_norms_.mutable_cpu_data() + bilateral_norms_.offset(n);
@@ -209,34 +214,43 @@ void BilateralInterface<Dtype>::Backward_cpu(
     }
   }
 
+  // TODO: gradient for featswrt
   caffe_set(featswrt->count(), Dtype(0.), featswrt->mutable_cpu_diff());
 
-  for (int n = 0; n < num_; ++n) {
+  // space for BP thru normalization
+  float* space_out_BP_norm = new float[out_spatial->offset(1)];
+  float* bilat_out_BP_norm = new float[out_bilateral->offset(1)];
+  memset(space_out_BP_norm, 0, sizeof(float)*out_spatial->offset(1));
+  memset(bilat_out_BP_norm, 0, sizeof(float)*out_bilateral->offset(1));
 
+  for (int n = 0; n < num_; ++n) {
     // BP thru normalization
-    Dtype *spatial_out_diff = out_spatial->mutable_cpu_diff() + out_spatial->offset(n);
+    Dtype const* spatial_out_diff = out_spatial->cpu_diff() + out_spatial->offset(n);
     for (int channel_id = 0; channel_id < channels_; ++channel_id) {
           caffe_mul(num_pixels_, spatial_norm_.cpu_data(),
-                spatial_out_diff + channel_id * num_pixels_,
-                spatial_out_diff + channel_id * num_pixels_);
+                channel_id > 0 ? space_out_BP_norm : (spatial_out_diff + channel_id * num_pixels_),
+                space_out_BP_norm);
     }
     // Gradient for message passing
     spatial_lattice_->compute(input->mutable_cpu_diff() + input->offset(n),
-                              out_spatial->cpu_diff() + out_spatial->offset(n),
+                              space_out_BP_norm,
                               channels_, true, false);
 
     // BP thru normalization
-    Dtype *bilateral_out_diff = out_bilateral->mutable_cpu_diff() + out_bilateral->offset(n);
+    Dtype const* bilateral_out_diff = out_bilateral->cpu_diff() + out_bilateral->offset(n);
     for (int channel_id = 0; channel_id < channels_; ++channel_id) {
           caffe_mul(num_pixels_, bilateral_norms_.cpu_data() + bilateral_norms_.offset(n),
-                bilateral_out_diff + channel_id * num_pixels_,
-                bilateral_out_diff + channel_id * num_pixels_);
+                channel_id > 0 ? bilat_out_BP_norm : (bilateral_out_diff + channel_id * num_pixels_),
+                bilat_out_BP_norm);
     }
     // Gradient for message passing
     bilateral_lattices_[n]->compute(input->mutable_cpu_diff() + input->offset(n),
-                                    out_bilateral->cpu_diff() + out_bilateral->offset(n),
+                                    bilat_out_BP_norm,
                                     channels_, true, true);
   }
+
+  delete[] space_out_BP_norm;
+  delete[] bilat_out_BP_norm;
 }
 
 

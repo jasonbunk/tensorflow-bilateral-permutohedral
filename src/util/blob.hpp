@@ -20,17 +20,12 @@ template <typename Dtype>
 class ptr_const_or_mutable {
 public:
     ptr_const_or_mutable() : unknown_cpu_gpu(0), cptr(nullptr), mptr(nullptr) {}
-    /*ptr_const_or_mutable(Dtype const*const init) : cptr(init), mptr(nullptr) {}
-    ptr_const_or_mutable& operator=(Dtype const*const someptr) {
-        cptr = someptr;
-        mptr = nullptr;
-    }*/
 
     void c_assign(Dtype const*const someptr) {
         cptr = someptr;
         mptr = nullptr;
     }
-    void m_assign(Dtype * someptr, uint8_t unknown_cpu_gpu_) {
+    void m_assign(Dtype * someptr, char unknown_cpu_gpu_) {
         unknown_cpu_gpu = unknown_cpu_gpu_;
         cptr = mptr = someptr;
     }
@@ -41,32 +36,15 @@ public:
     inline bool assigned()   const {return cptr != nullptr || mptr != nullptr;}
     inline bool assigned_m() const {return mptr != nullptr;}
 
-    Dtype const*const c_data() const {if(cptr==nullptr){std::cout<<"WARNING: c_data nullptr"<<std::endl;} return cptr;}
-    Dtype      *      m_data() const {if(mptr==nullptr){std::cout<<"WARNING: m_data nullptr"<<std::endl;} return mptr;}
+    Dtype const* c_data() const {if(cptr==nullptr){std::cout<<"WARNING: c_data nullptr"<<std::endl;} return cptr;}
+    Dtype      * m_data() const {if(mptr==nullptr){std::cout<<"WARNING: m_data nullptr"<<std::endl; if(cptr!=nullptr){std::cout<<"...but c_data is NOT nullptr, did you mean to ask for const data ptr??"<<std::endl;}} return mptr;}
 
     std::string str_representation() const {return std::string("c")+to_sstring(cptr)+std::string(", m")+to_sstring(mptr);}
 
-    void try_delete() {
-        if(mptr != nullptr) {
-            if(unknown_cpu_gpu == 1) {
-                delete[] mptr;
-            }
-#ifdef CPU_ONLY
-            else if(unknown_cpu_gpu >= 2) {
-                std::cout<<"cant be gpu in cpu_only mode"<<std::endl; assert(0);
-            }
-#else
-            else if(unknown_cpu_gpu >= 2) {
-                CUDA_CHECK(cudaFree(mptr));
-            }
-#endif
-        }
-        cptr = mptr = nullptr;
-        unknown_cpu_gpu = 0;
-    }
+    void try_delete();
 
 private:
-    uint8_t unknown_cpu_gpu; // 0 = unknown, 1 = cpu, 2 = gpu
+    char unknown_cpu_gpu; // 0 = unknown, 1 = cpu, 2 = gpu
     const Dtype* cptr;
           Dtype* mptr;
 };
@@ -130,13 +108,13 @@ public:
     int offset(int n)                   const { return   n * shape_123;                                 }
 */
 
-    Dtype const*const cpu_data() const {return buf_.c_data();}
-    Dtype const*const gpu_data() const {return buf_.c_data();}
+    Dtype const* cpu_data() const {return buf_.c_data();}
+    Dtype const* gpu_data() const {return buf_.c_data();}
     Dtype * mutable_cpu_data()   const {return buf_.m_data();}
     Dtype * mutable_gpu_data()   const {return buf_.m_data();}
 
-    Dtype const*const cpu_diff() const {return bufdiff_.c_data();}
-    Dtype const*const gpu_diff() const {return bufdiff_.c_data();}
+    Dtype const* cpu_diff() const {return bufdiff_.c_data();}
+    Dtype const* gpu_diff() const {return bufdiff_.c_data();}
     Dtype * mutable_cpu_diff()   const {return bufdiff_.m_data();}
     Dtype * mutable_gpu_diff()   const {return bufdiff_.m_data();}
 

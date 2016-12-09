@@ -21,7 +21,7 @@ def _BilateralFiltersGrad(op, *grad):
                           stdv_bilater_space=op.get_attr("stdv_bilater_space"))
   ret = list(ret)
   assert len(ret) == 2
-  ret[1] = None # no gradient for featswrt
+  #ret[1] = None # no gradient for featswrt
   return ret
 
 

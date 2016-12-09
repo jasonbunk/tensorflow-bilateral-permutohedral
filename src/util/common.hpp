@@ -83,7 +83,6 @@ using std::string;
 using std::stringstream;
 using std::vector;
 
-/*
 // A singleton class to hold common caffe stuff, such as the handler that
 // caffe is going to use for cublas, curand, etc.
 class Caffe {
@@ -167,7 +166,7 @@ class Caffe {
   Caffe();
 
   DISABLE_COPY_AND_ASSIGN(Caffe);
-};*/
+};
 
 }  // namespace caffe
 
