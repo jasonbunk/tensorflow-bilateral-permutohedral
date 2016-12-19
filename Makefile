@@ -259,17 +259,15 @@ EVERYTHING_TARGETS := all warn
 ##############################
 # Define build targets
 ##############################
-.PHONY: all lib copypy clean docs linecount $(DIST_ALIASES) \
+.PHONY: all lib clean docs linecount $(DIST_ALIASES) \
 	superclean supercleanlist supercleanfiles warn everything
 
-all: lib copypy
+all: lib
 
 lib: $(STATIC_NAME) $(DYNAMIC_NAME)
-
-copypy: $(shell cp src/*.py build/lib)
+	@ cp src/*.py build/lib
 
 #everything: $(EVERYTHING_TARGETS)
-
 #linecount:
 #	cloc --read-lang-def=$(PROJECT).cloc src
 

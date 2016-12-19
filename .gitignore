@@ -4,3 +4,5 @@ build
 *.png
 *.jpg
 *.pkl
+*.so
+

@@ -52,6 +52,8 @@ std::string describemat(const cv::Mat & inmat) {
 }
 //==============================================================================
 
+#define dSQR(a) ((a)*(a))
+
 void bilateralf(cv::Mat const& input,
 								cv::Mat const& featswrt,
 						    cv::Mat & out_spatial,
@@ -71,7 +73,7 @@ void bilateralf(cv::Mat const& input,
 	const int nchans_wrt = featswrt.channels();
 	stdv_space *= stdv_space; // convert to variances
 	stdv_color *= stdv_color;
-	assert(grad_chan < 0); //TODO
+	assert(grad_chan < (2+nchans_wrt));
 
 	double const*const data_input    = (double*)input.data;
 	double const*const data_featswrt = (double*)featswrt.data;
@@ -86,7 +88,7 @@ void bilateralf(cv::Mat const& input,
 		double const* elin_oth = nullptr;
 		double const* elft_oth = nullptr;
 		int cc;
-		double dists[5];
+		double dists[2+nchans_wrt];
 		double gauss_sp, gauss_bi;
 		// each thread processes a row, and loops over all columns
 		for(int jj=0; jj<out_spatial.cols; ++jj) {
@@ -97,18 +99,27 @@ void bilateralf(cv::Mat const& input,
 			for(int mm=0; mm<input.rows; ++mm) {
 				for(int nn=0; nn<input.cols; ++nn) {
 					// distances
-					dists[0] = (double) ((ii-mm)*(ii-mm));
-					dists[1] = (double) ((jj-nn)*(jj-nn));
+					dists[0] = (double)(ii-mm);
+					dists[1] = (double)(jj-nn);
 					elin_oth =    data_input + mm*step_in  + nn*nchans_in;
 					elft_oth = data_featswrt + mm*step_wrt + nn*nchans_wrt;
 					//vectype_wrt& elin =    input.at<vectype_wrt>(mm,nn);
 					//vectype_wrt& elft = featswrt.at<vectype_wrt>(mm,nn);
 					for(cc=0; cc<nchans_wrt; ++cc) {
-						dists[cc+2] = pow(elft_ref[cc] - elft_oth[cc], 2.0);
+						dists[cc+2] = (elft_ref[cc] - elft_oth[cc]);
 					}
 					// compute outputs
-					gauss_sp = exp(-0.5*(dists[0]+dists[1])/stdv_space);
-					gauss_bi = exp(-0.5*((dists[0]+dists[1])/stdv_color + dists[2]+dists[3]+dists[4])); //unit stdv for color dist
+					gauss_sp = exp(-0.5* (dSQR(dists[0])+dSQR(dists[1]))/stdv_space);
+					gauss_bi = exp(-0.5*((dSQR(dists[0])+dSQR(dists[1]))/stdv_color + dSQR(dists[2])+dSQR(dists[3])+dSQR(dists[4]))); //unit stdv for color dist
+
+					if(grad_chan >= 0) {
+						if(grad_chan < 2) {
+							gauss_sp *= (0.5*dists[grad_chan]/stdv_space);
+							gauss_bi *= (0.5*dists[grad_chan]/stdv_color);
+						} else {
+							gauss_bi *= (0.5*dists[grad_chan]);
+						}
+					}
 
 					for(cc=0; cc<nchans_in; ++cc) {
 						elou_sp[cc] += gauss_sp * elin_oth[cc];
