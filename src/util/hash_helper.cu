@@ -4,33 +4,33 @@
 
 namespace caffe {
 
-template<int kd> 
+template<int kd>
 __device__ __host__ static unsigned int hash(signed short *key) {
-  unsigned int k = 0; 
+  unsigned int k = 0;
   for (int i = 0; i < kd; i++) {
     k += key[i];
-    k = k * 1664525; 
+    k = k * 1664525;
   }
   return k;
 }
 
-template<int kd> 
+template<int kd>
 __device__ __host__ static unsigned int hash(int *key) {
-  unsigned int k = 0; 
+  unsigned int k = 0;
   for (int i = 0; i < kd; i++) {
     k += key[i];
-    k = k * 1664525; 
+    k = k * 1664525;
   }
   return k;
 }
 
-template<int kd> 
+template<int kd>
 __device__ static int hashTableInsert(unsigned int fh, signed short *key,
     signed short* table_keys,
     int* table_entries,
-    int table_capacity, 
-    unsigned int slot) 
-{    	
+    int table_capacity,
+    unsigned int slot)
+{
   int h = modHash(fh);
   while (1) {
     int *e = &table_entries[h];
@@ -41,7 +41,7 @@ __device__ static int hashTableInsert(unsigned int fh, signed short *key,
     if (contents == -2) {
       // If it was locked already, move on to the next cell
 
-    } else if (contents == -1) { 
+    } else if (contents == -1) {
       // If it was empty, we successfully locked it. Write our key.
 
       for (int i = 0; i < kd; i++) {
@@ -49,7 +49,7 @@ __device__ static int hashTableInsert(unsigned int fh, signed short *key,
       }
 
       // Unlock
-      atomicExch(e, slot); 
+      atomicExch(e, slot);
 
       return h;
     } else {
@@ -66,12 +66,12 @@ __device__ static int hashTableInsert(unsigned int fh, signed short *key,
   }
 }
 
-template<int kd> 
-__device__ static int hashTableInsert(signed short *key, 
+template<int kd>
+__device__ static int hashTableInsert(signed short *key,
     signed short* table_keys,
     int* table_entries,
-    int table_capacity, 
-    unsigned int slot) 
+    int table_capacity,
+    unsigned int slot)
 {
   unsigned int myHash = hash<kd>(key);
   return hashTableInsert<kd>(myHash, key, table_keys, table_entries, table_capacity, slot);
@@ -81,7 +81,7 @@ template<int kd>
 __device__ static int hashTableRetrieve(signed short *key,
     const int* table_entries,
     const signed short* table_keys,
-    const int table_capacity) 
+    const int table_capacity)
 {
   int h = modHash(hash<kd>(key));
   while (1) {
