@@ -16,19 +16,19 @@ def _BilateralFiltersGrad(op, *grad):
                           op.inputs[1],
                           #op.outputs[0],
                           grad[0],
-                          grad[1],
-                          stdv_spatial_space=op.get_attr("stdv_spatial_space"),
-                          stdv_bilater_space=op.get_attr("stdv_bilater_space"))
+                          stdv_space=op.get_attr("stdv_space"),
+                          stdv_color=op.get_attr("stdv_color"))
   ret = list(ret)
   assert len(ret) == 2
   #ret[1] = None # no gradient for featswrt
+  #ret[1] = ret[1] * 0.0 # no gradient for featswrt
   return ret
 
 
 def bilateral_filters( input,
                       featswrt,
-                      stdv_spatial_space=1.0,
-                      stdv_bilater_space=1.0,
+                      stdv_space=1.0,
+                      stdv_color=1.0,
                       name=None):
   """
   interface to .so library function
@@ -37,10 +37,10 @@ def bilateral_filters( input,
     # process inputs
     input    = ops.convert_to_tensor(input,    name="input")
     featswrt = ops.convert_to_tensor(featswrt, name="featswrt")
-    stdv_spatial_space = float(stdv_spatial_space)
-    stdv_bilater_space = float(stdv_bilater_space)
+    stdv_space = float(stdv_space)
+    stdv_color = float(stdv_color)
     # call using loaded .so
     return libtfgaussiancrf.bilateral_filters(input,
                                               featswrt,
-                                              stdv_spatial_space=stdv_spatial_space,
-                                              stdv_bilater_space=stdv_bilater_space)
+                                              stdv_space=stdv_space,
+                                              stdv_color=stdv_color)

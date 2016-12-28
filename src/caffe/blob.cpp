@@ -3,7 +3,7 @@
 #include "common.hpp" // GPU/CPU modes, cuda utils
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/highgui/highgui.hpp>
-#include "device_alternate.hpp"
+#include "caffe/util/device_alternate.hpp"
 
 #define BUF_CODE_TENS 0
 #define BUF_CODE_CPU 1
@@ -29,6 +29,9 @@ void ptr_const_or_mutable<Dtype>::try_delete() {
     cptr = mptr = nullptr;
     unknown_cpu_gpu = 0;
 }
+
+
+namespace caffe {
 
 
 template <typename Dtype>
@@ -110,6 +113,41 @@ void Blob<Dtype>::ShapeFrom(tensorflow::TensorShape const*const input) {
     }
     ResetShapes();
     CHECK_EQ(num_axes(), 4) << "input must be 4-tensor!";
+}
+
+template <typename Dtype>
+Dtype const* Blob<Dtype>::cpu_data() const {
+    if(is_gpu_) {
+        std::cout<<"WARNING: Blob<>::cpu_data(): COPYING DATA FROM GPU TO CPU,"
+                <<"ALLOCATING CPU BUFFER, NOT FREEING THE BUFFER:"<<std::endl
+                <<"              MEMORY LEAK IMMINENT: USE FOR DEBUGGING ONLY"<<std::endl;
+#ifndef CPU_ONLY
+        Dtype* newbuf = new Dtype[count_];
+        CUDA_CHECK(cudaMemcpy(newbuf, gpu_data(), sizeof(Dtype)*count_, cudaMemcpyDeviceToHost));
+        return newbuf;
+#else
+        LOG(FATAL) << "should not be gpu if compiled for CPU_ONLY";
+        return NULL;
+#endif
+    }
+    return buf_.c_data();
+}
+template <typename Dtype>
+Dtype const* Blob<Dtype>::cpu_diff() const {
+    if(is_gpu_) {
+        std::cout<<"WARNING: Blob<>::cpu_diff(): COPYING DATA FROM GPU TO CPU,"
+                <<"ALLOCATING CPU BUFFER, NOT FREEING THE BUFFER:"<<std::endl
+                <<"              MEMORY LEAK IMMINENT: USE FOR DEBUGGING ONLY"<<std::endl;
+#ifndef CPU_ONLY
+        Dtype* newbuf = new Dtype[count_];
+        CUDA_CHECK(cudaMemcpy(newbuf, gpu_diff(), sizeof(Dtype)*count_, cudaMemcpyDeviceToHost));
+        return newbuf;
+#else
+        LOG(FATAL) << "should not be gpu if compiled for CPU_ONLY";
+        return NULL;
+#endif
+    }
+    return buf_.c_data();
 }
 
 template <typename Dtype>
@@ -206,19 +244,19 @@ std::string Blob<Dtype>::DebugStr() {
 }
 
 template <typename Dtype>
-void Blob<Dtype>::debug_visualize_buf_(std::string wname) {
-    debug_visualize(wname, buf_.c_data());
+void Blob<Dtype>::debug_visualize_buf_(std::string wname) const {
+    debug_visualize(wname, cpu_data());
 }
 template <typename Dtype>
-void Blob<Dtype>::debug_visualize_bufdiff_(std::string wname) {
-    debug_visualize(wname, bufdiff_.c_data());
+void Blob<Dtype>::debug_visualize_bufdiff_(std::string wname) const {
+    debug_visualize(wname, cpu_diff());
 }
 
 #define MINOF2(x,y) ((x)<(y)?(x):(y))
 #define MAXOF2(x,y) ((x)>(y)?(x):(y))
 
 template <typename Dtype>
-void Blob<Dtype>::debug_visualize(std::string wname, Dtype const*const thebuf) {
+void Blob<Dtype>::debug_visualize(std::string wname, Dtype const*const thebuf) const {
   CHECK_EQ(num_axes(), 4);
   const int nbatch = shape(0);
   const int nchans = MINOF2(shape(1),3);
@@ -252,10 +290,12 @@ void Blob<Dtype>::debug_visualize(std::string wname, Dtype const*const thebuf) {
   }
 }
 
+} // namespace caffe
+
 /*	Compile certain expected uses of Blob.
 	Will cause "undefined reference" errors if you use a type not defined here.
 */
 template class ptr_const_or_mutable<float>;
 template class ptr_const_or_mutable<double>;
-template class Blob<float>;
-template class Blob<double>;
+template class caffe::Blob<float>;
+template class caffe::Blob<double>;

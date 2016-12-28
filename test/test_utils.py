@@ -2,6 +2,33 @@ import os, sys
 import tensorflow as tf
 import numpy as np
 
+def normalizeimg(im, simpleclip=False):
+    img = np.array(im)
+    if len(img.shape) == 3 and img.shape[2] == 2:
+        img = np_2channel_to_3channel(img,2)
+    goalsize = 200*200
+    if simpleclip:
+        im[im<0.0] = 0.0
+        im[im>1.0] = 1.0
+        theim = im
+    else:
+        if True:
+            if True:
+                centered = img - np.median(img,axis=(0,1),keepdims=True)
+                istdv = np.std(centered,axis=(0,1),keepdims=True)
+            else:
+                centered = img - np.median(img)
+                istdv = np.std(centered)
+            theim = np.clip(0.5 + centered / (8.0*istdv), 0.0, 1.0)
+        else:
+            imin = np.amin(img)
+            imax = np.amax(img)
+            theim = (img-imin)/(imax-imin)
+    #if im.size < goalsize:
+    #    fsc = np.ceil(np.sqrt(float(goalsize) / float(im.size)))
+    #    theim = cv2.resize(theim,(0,0),fx=fsc,fy=fsc,interpolation=cv2.INTER_NEAREST)
+    return theim
+
 def load_func_from_lib():
     path2file = os.path.dirname(os.path.realpath(__file__))
     builtlibpath_dir = os.path.join(path2file, '../build/lib')
@@ -38,7 +65,7 @@ def load_4channel_truth_img(filepath):
     return train_x, train_y
 
 def conv1x1(input, chansin, chansout, activation_fn, scopename="", bias=True,
-            weights_init_value=None, bias_init_value=None):
+            weights_init_value=None, bias_init_value=None, kernelwidth=1):
     chansin = int(chansin)
     chansout = int(chansout)
     with tf.variable_scope("conv1x1"+scopename) as scope:
@@ -49,7 +76,7 @@ def conv1x1(input, chansin, chansout, activation_fn, scopename="", bias=True,
             wshape = None
             weightinit = tf.constant(weights_init_value)
         else:
-            wshape = (1,1,chansin,chansout)
+            wshape = (kernelwidth,kernelwidth,chansin,chansout)
             weightinit = tf.truncated_normal_initializer(stddev=initstdv)
         weights = tf.get_variable(shape=wshape,
                         initializer=weightinit,

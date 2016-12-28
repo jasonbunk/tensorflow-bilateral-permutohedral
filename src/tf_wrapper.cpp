@@ -13,8 +13,11 @@
 typedef Eigen::ThreadPoolDevice CPUDevice;
 typedef Eigen::GpuDevice GPUDevice;
 
-#include "util/common.hpp" // GPU/CPU modes
-#include "bilateral_interface.hpp"
+#include "caffe/common.hpp" // GPU/CPU modes
+#include "caffe/bilateral_filter/permutohedral_ops.h"
+using caffe::Blob;
+using std::vector;
+using boost::shared_ptr;
 
 namespace tensorflow {
 
@@ -26,59 +29,136 @@ struct LaunchBilateralFiltersGrad;
 
 
 template<typename Device, typename T>
-class BilateralFiltersOp: public OpKernel {
+class BilateralFiltersOp_For_or_Back : public OpKernel {
+public:
+    explicit BilateralFiltersOp_For_or_Back(OpKernelConstruction* context) :
+            OpKernel(context), bilateral_interface_cpu_(NULL)
+#ifndef CPU_ONLY
+            ,stream_(NULL), bilateral_interface_gpu_(NULL)
+#endif
+            {
+        // get scalars
+        OP_REQUIRES_OK(context, context->GetAttr("stdv_space", &stdv_space_));
+        OP_REQUIRES_OK(context, context->GetAttr("stdv_color", &stdv_color_));
+        OP_REQUIRES_OK(context, context->GetAttr("create_spatial_dimension_features", &create_spatial_dimension_features_));
+        // check scalars
+        OP_REQUIRES(context, stdv_space_ > 0.0f,
+            errors::InvalidArgument("require stdv_space > 0.0, got: ", stdv_space_));
+        OP_REQUIRES(context, stdv_color_ > 0.0f,
+            errors::InvalidArgument("require stdv_color > 0.0, got: ", stdv_color_));
+
+        // setup cuda stream
+        #ifndef CPU_ONLY
+          if(std::is_same<Device, GPUDevice>::value) {
+            if(stream_ == NULL) {
+              stream_ = new cudaStream_t;
+              CUDA_CHECK(cudaStreamCreate(stream_));
+            }
+          }
+        #endif
+    }
+
+protected:
+    float stdv_space_;
+    float stdv_color_;
+    bool create_spatial_dimension_features_;
+    vector<float> stdv_widths_host_;
+    PermutohedralOp_CPU<T> * bilateral_interface_cpu_;
+#ifndef CPU_ONLY
+    cudaStream_t* stream_;
+    PermutohedralOp_GPU<T> * bilateral_interface_gpu_;
+#endif
+
+    void init_stdv_widths_host(int nspatialch_wrt, int nchannels_wrt) {
+        if (stdv_color_ > 0.0f || stdv_space_ > 0.0f) {
+          CHECK(stdv_color_ > 0.0f && stdv_space_ > 0.0f);
+          CHECK(nchannels_wrt > nspatialch_wrt);
+          stdv_widths_host_.resize(nchannels_wrt);
+          for(int ii=0; ii<nspatialch_wrt; ++ii)
+            stdv_widths_host_[ii] = stdv_space_;
+          for(int ii=nspatialch_wrt; ii<nchannels_wrt; ++ii)
+            stdv_widths_host_[ii] = stdv_color_;
+        } else {
+          for(int ii=0; ii<nchannels_wrt; ++ii)
+            stdv_widths_host_[ii] = 1.0f;
+        }
+    }
+    void free_interface_pointers() {
+        if(bilateral_interface_cpu_ != NULL) {
+          delete bilateral_interface_cpu_; bilateral_interface_cpu_ = NULL;
+        }
+#ifndef CPU_ONLY
+        if(bilateral_interface_gpu_ != NULL) {
+          delete bilateral_interface_gpu_; bilateral_interface_gpu_ = NULL;
+        }
+#endif
+    }
+};
+
+
+
+template<typename Device, typename T>
+class BilateralFiltersOp : public BilateralFiltersOp_For_or_Back<Device,T> {
 public:
     explicit BilateralFiltersOp(OpKernelConstruction* context) :
-            OpKernel(context) {
-        // get scalars
-        OP_REQUIRES_OK(context, context->GetAttr("stdv_spatial_space", &stdv_spatial_space));
-        OP_REQUIRES_OK(context, context->GetAttr("stdv_bilater_space", &stdv_bilater_space));
-        // check scalars
-        OP_REQUIRES(context, stdv_spatial_space > 0.0f,
-            errors::InvalidArgument("require stdv_spatial_space > 0.0, got: ", stdv_spatial_space));
-        OP_REQUIRES(context, stdv_bilater_space > 0.0f,
-            errors::InvalidArgument("require stdv_bilater_space > 0.0, got: ", stdv_bilater_space));
-    }
+            BilateralFiltersOp_For_or_Back<Device,T>(context) {}
 
     void Compute(OpKernelContext* context) override {
         // inputs
         const Tensor& input = context->input(0);
         const Tensor& ftwrt = context->input(1);
-        // outputs
-        Tensor* out_spatial = nullptr; OP_REQUIRES_OK(context, context->allocate_output(0, input.shape(), &out_spatial));
-        Tensor* out_bilateral=nullptr; OP_REQUIRES_OK(context, context->allocate_output(1, input.shape(), &out_bilateral));
+        // output(s)
+        Tensor* out_bilateral=nullptr; OP_REQUIRES_OK(context, context->allocate_output(0, input.shape(), &out_bilateral));
 
-        // check 4 dimensional inputs
-        auto err0 = errors::InvalidArgument("shape must be 4-dimensional");
-        OP_REQUIRES(context, input.shape().dims() == 4, err0);
-        OP_REQUIRES(context, ftwrt.shape().dims() == 4, err0);
+#ifdef CPU_ONLY
+        const bool is_gpu = false;
+#else
+        const bool is_gpu = std::is_same<Device, GPUDevice>::value;
+#endif
+
+        // check input dimensions
+        auto err0 = errors::InvalidArgument("input shapes must be same and at least 3-dimensional");
+        OP_REQUIRES(context, input.shape().dims() == ftwrt.shape().dims(), err0);
+        OP_REQUIRES(context, input.shape().dims() >= 3, err0);
+        OP_REQUIRES(context, ftwrt.shape().dims() >= 3, err0);
 
         // input and featswrt must have same minibatch count and spatial dims
         auto err1 = errors::InvalidArgument("input and featswrt must have same minibatch count and spatial dims");
         OP_REQUIRES(context, input.shape().dim_size(0) == ftwrt.shape().dim_size(0), err1);
-        OP_REQUIRES(context, input.shape().dim_size(2) == ftwrt.shape().dim_size(2), err1);
-        OP_REQUIRES(context, input.shape().dim_size(3) == ftwrt.shape().dim_size(3), err1);
+        for(int ii=2; ii<input.shape().dims(); ++ii) {
+            OP_REQUIRES(context, input.shape().dim_size(ii) == ftwrt.shape().dim_size(ii), err1);
+        }
 
         // build blobs (wrappers around tensors, pointing to tensor memory)
-        Blob<T> blob_input(&input);
-        Blob<T> blob_ftwrt(&ftwrt);
-        Blob<T> blob_out_spatial(out_spatial);       blob_out_spatial.DataFrom_m(out_spatial);
-        Blob<T> blob_out_bilateral(out_bilateral); blob_out_bilateral.DataFrom_m(out_bilateral);
+        Blob<T> blob_input(&input, is_gpu);
+        Blob<T> blob_ftwrt(&ftwrt, is_gpu);
+        Blob<T> blob_out_bilateral(out_bilateral, is_gpu); blob_out_bilateral.DataFrom_m(out_bilateral);
 
+        // check spatial dimensions, if we need to create spatial features
+        const int nspatialch_wrt = this->create_spatial_dimension_features_ ? (blob_ftwrt.num_axes() - 2) : 0;
+        const int nchannels_wrt = blob_ftwrt.shape(1) + nspatialch_wrt;
+
+        this->init_stdv_widths_host(nspatialch_wrt, nchannels_wrt);
+
+        this->free_interface_pointers();
+#ifndef CPU_ONLY
         // set up and run the filtering
-        BilateralInterface<T> filterer(std::is_same<Device, CPUDevice>::value);
-        filterer.OneTimeSetUp(&blob_input, &blob_ftwrt,
-                            stdv_spatial_space, stdv_bilater_space);
-        if(std::is_same<Device, CPUDevice>::value) {
-            filterer.Forward_cpu(&blob_input, &blob_ftwrt, &blob_out_spatial, &blob_out_bilateral);
+        if(std::is_same<Device, GPUDevice>::value) {
+            this->bilateral_interface_gpu_ = new_permutohedral_gpu_op<T>(nchannels_wrt, this->stdv_widths_host_,
+                                                                    this->create_spatial_dimension_features_);
+            CHECK(this->stream_ != NULL);
+            this->bilateral_interface_gpu_->Forward(this->stream_, -1, &blob_input, &blob_ftwrt, &blob_out_bilateral);
         } else {
-            filterer.Forward_gpu(&blob_input, &blob_ftwrt, &blob_out_spatial, &blob_out_bilateral);
+#else
+            {
+#endif
+            this->bilateral_interface_cpu_ = new PermutohedralOp_CPU<T>(this->stdv_widths_host_);
+            this->bilateral_interface_cpu_->Forward(&blob_input, &blob_ftwrt, &blob_out_bilateral);
         }
+        this->free_interface_pointers();
     }
 
 private:
-    float stdv_spatial_space, stdv_bilater_space;
-
     BilateralFiltersOp()  {std::cout<<"@@@@@@@@@@@@@@@@@@@@@@@@ BilateralFiltersOp() private constructor"<<std::endl;}
     ~BilateralFiltersOp() {std::cout<<"@@@@@@@@@@@@@@@@@@@@@@@@ BilateralFiltersOp() private destructor"<<std::endl;}
 };
@@ -86,50 +166,73 @@ private:
 
 
 template<typename Device, typename T>
-class BilateralFiltersGradOp: public OpKernel {
+class BilateralFiltersGradOp : public BilateralFiltersOp_For_or_Back<Device,T> {
 public:
     explicit BilateralFiltersGradOp(OpKernelConstruction* context) :
-            OpKernel(context) {
-        // get scalars
-        OP_REQUIRES_OK(context, context->GetAttr("stdv_spatial_space", &stdv_spatial_space));
-        OP_REQUIRES_OK(context, context->GetAttr("stdv_bilater_space", &stdv_bilater_space));
-        // check scalars
-        OP_REQUIRES(context, stdv_spatial_space > 0.0f,
-            errors::InvalidArgument("require stdv_spatial_space > 0.0, got: ", stdv_spatial_space));
-        OP_REQUIRES(context, stdv_bilater_space > 0.0f,
-            errors::InvalidArgument("require stdv_bilater_space > 0.0, got: ", stdv_bilater_space));
-    }
+            BilateralFiltersOp_For_or_Back<Device,T>(context) {}
 
     void Compute(OpKernelContext* context) override {
         // inputs
         const Tensor& input = context->input(0);
         const Tensor& ftwrt = context->input(1);
-        const Tensor& topgrad_spatial = context->input(2);
-        const Tensor& topgrad_bilater = context->input(3);
+        const Tensor& topgrad_bilater = context->input(2);
         // output gradients
         Tensor* grad_input = nullptr; OP_REQUIRES_OK(context, context->allocate_output(0, input.shape(), &grad_input));
         Tensor* grad_ftwrt = nullptr; OP_REQUIRES_OK(context, context->allocate_output(1, ftwrt.shape(), &grad_ftwrt));
 
-        // build blobs (wrappers around tensors, pointing to tensor memory)
-        Blob<T> blob_input(&input); blob_input.DiffFrom_m(grad_input);
-        Blob<T> blob_ftwrt(&ftwrt); blob_ftwrt.DiffFrom_m(grad_ftwrt);
-        Blob<T> blob_topgrad_spatial(&topgrad_spatial); blob_topgrad_spatial.DiffFrom_c(&topgrad_spatial);
-        Blob<T> blob_topgrad_bilater(&topgrad_bilater); blob_topgrad_bilater.DiffFrom_c(&topgrad_bilater);
+        #ifdef CPU_ONLY
+                const bool is_gpu = false;
+        #else
+                const bool is_gpu = std::is_same<Device, GPUDevice>::value;
+        #endif
 
-        // set up and run the filtering
-        BilateralInterface<T> filterer(std::is_same<Device, CPUDevice>::value);
-        filterer.OneTimeSetUp(&blob_input, &blob_ftwrt,
-                            stdv_spatial_space, stdv_bilater_space);
-        if(std::is_same<Device, CPUDevice>::value) {
-            filterer.Backward_cpu(&blob_input, &blob_ftwrt, &blob_topgrad_spatial, &blob_topgrad_bilater);
-        } else {
-            filterer.Backward_gpu(&blob_input, &blob_ftwrt, &blob_topgrad_spatial, &blob_topgrad_bilater);
+        // check input dimensions
+        auto err0 = errors::InvalidArgument("input shapes must be same and at least 3-dimensional");
+        OP_REQUIRES(context, input.shape().dims() == ftwrt.shape().dims(), err0);
+        OP_REQUIRES(context, input.shape().dims() == topgrad_bilater.shape().dims(), err0);
+        OP_REQUIRES(context, input.shape().dims() >= 3, err0);
+        OP_REQUIRES(context, ftwrt.shape().dims() >= 3, err0);
+        OP_REQUIRES(context, topgrad_bilater.shape().dims() >= 3, err0);
+
+        // input and featswrt must have same minibatch count and spatial dims
+        auto err1 = errors::InvalidArgument("input and featswrt must have same minibatch count and spatial dims");
+        OP_REQUIRES(context, input.shape().dim_size(0) == ftwrt.shape().dim_size(0), err1);
+        OP_REQUIRES(context, input.shape().dim_size(0) == topgrad_bilater.shape().dim_size(0), err1);
+        for(int ii=2; ii<input.shape().dims(); ++ii) {
+            OP_REQUIRES(context, input.shape().dim_size(ii) == ftwrt.shape().dim_size(ii), err1);
+            OP_REQUIRES(context, input.shape().dim_size(ii) == topgrad_bilater.shape().dim_size(ii), err1);
         }
+
+        // build blobs (wrappers around tensors, pointing to tensor memory)
+        Blob<T> blob_input(&input, is_gpu); blob_input.DiffFrom_m(grad_input);
+        Blob<T> blob_ftwrt(&ftwrt, is_gpu); blob_ftwrt.DiffFrom_m(grad_ftwrt);
+        Blob<T> blob_topgrad_bilater(&topgrad_bilater, is_gpu); blob_topgrad_bilater.DiffFrom_c(&topgrad_bilater);
+
+        // check spatial dimensions, if we need to create spatial features
+        const int nspatialch_wrt = this->create_spatial_dimension_features_ ? (blob_ftwrt.num_axes() - 2) : 0;
+        const int nchannels_wrt = blob_ftwrt.shape(1) + nspatialch_wrt;
+
+        this->init_stdv_widths_host(nspatialch_wrt, nchannels_wrt);
+
+        this->free_interface_pointers();
+#ifndef CPU_ONLY
+        // set up and run the filtering
+        if(std::is_same<Device, GPUDevice>::value) {
+            this->bilateral_interface_gpu_ = new_permutohedral_gpu_op<T>(nchannels_wrt, this->stdv_widths_host_,
+                                                                    this->create_spatial_dimension_features_);
+            CHECK(this->stream_ != NULL);
+            this->bilateral_interface_gpu_->Backward(this->stream_, -1, true, true, &blob_input, &blob_ftwrt, &blob_topgrad_bilater);
+        } else {
+#else
+            {
+#endif
+            this->bilateral_interface_cpu_ = new PermutohedralOp_CPU<T>(this->stdv_widths_host_);
+            this->bilateral_interface_cpu_->Backward(true, true, &blob_input, &blob_ftwrt, &blob_topgrad_bilater);
+        }
+        this->free_interface_pointers();
     }
 
 private:
-    float stdv_spatial_space, stdv_bilater_space;
-
     BilateralFiltersGradOp()  {std::cout<<"@@@@@@@@@@@@@@@@@@@@@@@@ BilateralFiltersGradOp() private constructor"<<std::endl;}
     ~BilateralFiltersGradOp() {std::cout<<"@@@@@@@@@@@@@@@@@@@@@@@@ BilateralFiltersGradOp() private destructor"<<std::endl;}
 };
@@ -139,10 +242,10 @@ private:
 REGISTER_OP("BilateralFilters")
 .Input("input: T")
 .Input("featswrt: T")
-.Output("out_spatial: T")
 .Output("out_bilateral: T")
-.Attr("stdv_spatial_space: float = 1.0")
-.Attr("stdv_bilater_space: float = 1.0")
+.Attr("stdv_space: float = 1.0")
+.Attr("stdv_color: float = 1.0")
+.Attr("create_spatial_dimension_features: bool = true")
 .Attr("T: realnumbertype")
 .Doc(R"doc(
 Copies all input values to the output
@@ -162,51 +265,16 @@ Copies all input values to the output
 REGISTER_OP("BilateralFiltersGrad")
 .Input("input: T")
 .Input("featswrt: T")
-.Input("topgrad_spatial: T")
 .Input("topgrad_bilater: T")
 .Output("grad_input: T")
 .Output("grad_featswrt: T")
-.Attr("stdv_spatial_space: float = 1.0")
-.Attr("stdv_bilater_space: float = 1.0")
+.Attr("stdv_space: float = 1.0")
+.Attr("stdv_color: float = 1.0")
+.Attr("create_spatial_dimension_features: bool = true")
 .Attr("T: realnumbertype")
 .Doc(R"doc(
 Copies all input values to the output
 )doc");
-
-#if 0
-typedef FunctionDefHelper FDH;
-Status BilateralFiltersGrad(const AttrSlice& attrs, FunctionDef* g) {
-  // clang-format off
-  *g = FDH::Define(
-    // Arg defs
-    {"input: T", "featswrt: T", "wspatial: T", "wbilateral: T", "top_grad: T"},
-    // Ret val defs
-    {"grad_input: T", "grad_featswrt: T", "grad_wspatial: T", "grad_wbilateral: T"},
-    // Attr defs
-    {"T: realnumbertype",
-     "stdv_spatial_space: float",
-     "stdv_bilater_space: float"},
-    // Nodes
-    {
-      // forward op
-      {{"bfilttop"},
-       /*opname*/"BilateralFilters",
-       /*inputs*/{"input", "featswrt", "wspatial", "wbilateral"},
-       /*Attrs=*/{{"T", "$T"},
-                  {"stdv_spatial_space", "$stdv_spatial_space"},
-                  {"stdv_bilater_space", "$stdv_bilater_space"}}},
-      // backwards op
-      {{"grad_input","grad_featswrt","grad_wspatial","grad_wbilateral"},
-       /*opname*/"BilateralFiltersGrad",
-       /*inputs*/{"input", "featswrt", "wspatial", "wbilateral", "top_grad"},
-       /*Attrs=*/{{"T", "$T"},
-                  {"stdv_spatial_space", "$stdv_spatial_space"},
-                  {"stdv_bilater_space", "$stdv_bilater_space"}}}
-    });
-  // clang-format on
-  return Status::OK();
-}
-#endif
 
 #define REGISTER_MYBILATERALFILT_KERNELS_CPU(type)                               \
   REGISTER_KERNEL_BUILDER(                                                       \

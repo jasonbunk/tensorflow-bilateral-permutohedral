@@ -1,0 +1,6 @@
+
+
+	1. python test/test_segment.py
+	2. python test/test_gradients.py
+	3. python test/gradient_wrt_test.py
+

@@ -1,6 +1,6 @@
 import os,sys
 # force run on CPU
-os.environ['CUDA_VISIBLE_DEVICES'] = ''
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 import numpy as np
 import tensorflow as tf
@@ -20,40 +20,40 @@ try:
     cv2available = True
 except:
     from PIL import Image
-
-def normalizeimg(im):
-    img = np.array(im)
-    imin = np.amin(img)
-    imax = np.amax(img)
-    goalsize = 200*200
-    theim = (img-imin)/(imax-imin)
-    #if im.size < goalsize:
-    #    fsc = np.ceil(np.sqrt(float(goalsize) / float(im.size)))
-    #    theim = cv2.resize(theim,(0,0),fx=fsc,fy=fsc,interpolation=cv2.INTER_NEAREST)
-    return theim
+from test_utils import normalizeimg
 
 if cv2available:
     def imshow(wname,img):
-        cv2.imshow(wname,normalizeimg(img))
-        cv2.waitKey(0)
+        #cv2.imshow(wname,normalizeimg(img))
+        #cv2.waitKey(0)
+        cv2.imwrite(wname+'.png',np.round(normalizeimg(img)*255.0).astype(np.uint8))
     def imread(imfile):
         return cv2.imread(imfile,cv2.IMREAD_COLOR)
 else:
     def imshow(wname,img):
-        Image.fromarray(normalizeimg(img),'RGB').show()
+        Image.fromarray(np.round(normalizeimg(img)*255.0).astype(np.uint8)[:,:,::-1],'RGB').show()
     def imread(imfile):
-        return np.array(Image.open(catfile))[:,:,::-1]
+        inimg = np.array(Image.open(catfile))
+        if len(inimg.shape) == 3 and inimg.shape[2] == 4:
+            inimg = inimg[:,:,:3]
+        return inimg[:,:,::-1]
+
+
+THE_IMAGE_FILE = 'tiny_target_rgb.png'
+#THE_IMAGE_FILE = 'cat_square_content_aware_108x108.png'
+
 
 # cv2 image read shape: (height, width, channels)
 # tensorflow conv2d image shape: (batch, height, width, channels)
-catfile = os.path.join(path2file,'cat.jpg')
+catfile = os.path.join(path2file,THE_IMAGE_FILE)
 catim = imread(catfile).astype(np.float32) / 255.0
 catim = catim.reshape([1,]+list(catim.shape))
 
 tfcatplaceholder = tf.placeholder(tf.float32, catim.shape, name="tfcatplaceholder")
 
-npwspatial = 0.5
-npwbilateral = 0.5
+npwspatial = 1.0
+npwbilateral = 0.25
+stdv = 3.375 * float(catim.shape[1])/108.0
 
 totalscalenorm = (npwspatial + npwbilateral)
 
@@ -72,13 +72,13 @@ nchwcat_bilat = nchw_cat / tf.constant(1e-9 + npwbilateral)
 
 ret = bilateral_filters(tf.Print(nchwcat_space, [nchwcat_space], msgstr+"input"),
                         tf.Print(nchwcat_space, [nchwcat_space], msgstr+"featswrt"),
-                        8.0, 8.0)
+                        stdv, stdv)
 outspace,_ = ret
 outspace = tf.Print(outspace, [outspace], msgstr+"outspace")
 
 ret = bilateral_filters(nchwcat_bilat,
                         nchwcat_bilat,
-                        8.0, 8.0)
+                        stdv, stdv)
 _,outbilat = ret
 outbilat = tf.Print(outbilat, [outbilat], msgstr+"outbilat")
 
@@ -100,6 +100,7 @@ describe("tfcatplaceholder",tfcatplaceholder)
 describe("outspace",outspace)
 describe("outbilat",outbilat)
 describe("PREINIT: catbilat",catbilat)
+print("stdv: "+str(stdv))
 print("\n")
 
 #---------------------------------------------------------------------
@@ -123,8 +124,8 @@ describe("AFT: catbilat",catbilat)
 describe("catim",catim)
 describe("npcatbilat",npcatbilat)
 imshow("catim",catim[0,...])
-imshow("npcatspace",npcatspace[0,...])
-imshow("npcatbilat",npcatbilat[0,...])
+imshow("grad_4_permut_space_gputest",npcatspace[0,...])
+imshow("grad_4_permut_bilat_gputest",npcatbilat[0,...])
 #cv2.waitKey(0)
 
 for jj in range(10):

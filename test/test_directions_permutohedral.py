@@ -63,14 +63,38 @@ def perm_project_dp1(rowvecs, d_):
 def get_permutohedral_basis(dim):
     basis_dp1 = np.eye(dim+1).astype(np.float64)
     rawprojbasis = perm_project_d(basis_dp1, dim)
-    return rawprojbasis / np.sqrt(np.sum(np.square(rawprojbasis),axis=1,keepdims=True))
+    projnorms = np.reciprocal(np.sqrt(np.sum(np.square(rawprojbasis),axis=1,keepdims=True)))
+    simpdesc("projnorms", projnorms)
+    return rawprojbasis * projnorms
 
 if __name__ == '__main__':
-    d_ = 2
+    import sys
+    try:
+        d_ = int(sys.argv[1])
+    except:
+        print("usage:   {d_}")
+        quit()
     projbasis = get_permutohedral_basis(d_)
+
+    simpdesc("projbasis",projbasis)
+    projdotproj = np.dot(projbasis.transpose(), projbasis)
+    simpdesc("projdotproj",projdotproj)
+
+    Amat = projbasis
+    Ano = np.dot( npl.pinv(np.dot(Amat.transpose(),Amat)), Amat.transpose() )
+    simpdesc("Ano",Ano)
+
+    Anoalt = Amat.transpose() * float(d_)/float(d_+1)
+    simpdesc("Anoalt",Anoalt)
+
+    diffbetwA = np.sum(np.fabs(Ano - Anoalt))
+    print("Anoalt vs Ano: sum of differences: "+str(diffbetwA))
+
+    quit()
 
     print(" ")
     simpdesc("projbasis",projbasis)
+    quit()
 
     if projbasis.shape[1] == 2:
         assert projbasis.shape[0] == d_+1

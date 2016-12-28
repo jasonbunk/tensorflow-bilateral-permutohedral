@@ -49,15 +49,25 @@ tf_y_placehold = tf.placeholder(tf.float32, train_y.shape, name="tf_x_placehold"
 
 #----------------------------------------
 useCRF = True
-LEARNRATE = 0.01
+LEARNRATE = 0.02
 NUMITERS = 10000
 
 #comp_conv1 = conv1x1(tf_x_placehold, 3, 3, tf.nn.elu, "comp_conv1")
 #comp_class = conv1x1(comp_conv1,     3, 2, None,      "comp_class")
 comp_class = conv1x1(tf_x_placehold,  3, 2, None,      "comp_class")
+
+tf_x_pad = tf.pad(tf_x_placehold, [[0,0],[1,1],[1,1],[0,0]], mode='SYMMETRIC')
+padconvembed = conv1x1(tf_x_pad, 3, 1, activation_fn=tf.tanh, kernelwidth=3)
+
+#print(" ")
+describe("- tf_x_placehold", tf_x_placehold)
+describe("- tf_x_pad", tf_x_pad)
+describe("- padconvembed", padconvembed)
+print(" ")
+#quit()
 #----------------------------------------
 
-crfprescale  = None
+#crfprescale  = None
 tfwspatial   = None
 tfwbilateral = None
 if not useCRF:
@@ -65,7 +75,7 @@ if not useCRF:
     finalpred_logits = comp_class
 else:
     stdv_space = 1.2
-    stdv_color = 1.2
+    stdv_color = 0.333
     print("using CRF")
     #crfprescale  = tf.get_variable('crfprescale', initializer=tf.constant(1.0))
     tfwspatial   = tf.get_variable('tfwspatial',  initializer=tf.constant(1.0))
@@ -73,7 +83,7 @@ else:
 
     reshcc = NHWC_to_NCHW(comp_class)# * crfprescale)
     outbilat = bilateral_filters(input=reshcc, #input
-                            featswrt=NHWC_to_NCHW(tf_x_placehold), #featswrt
+                            featswrt=NHWC_to_NCHW(padconvembed * tfwspatial), #featswrt
                             stdv_space=stdv_space,
                             stdv_color=stdv_color)
     finalpred_logits = NCHW_to_NHWC(outbilat * tfwbilateral)
@@ -85,11 +95,11 @@ train_step = tf.train.AdamOptimizer(LEARNRATE).minimize(total_loss)
 
 if useCRF:
     print("constructed the filter!!!!!!!!!!!!!!!!!!!!!!")
-describe("tf_x_placehold",tf_x_placehold)
-describe("tf_y_placehold",tf_y_placehold)
-describe("finalpred_logits",finalpred_logits)
+#describe("tf_x_placehold",tf_x_placehold)
+describe("- tf_y_placehold",tf_y_placehold)
+describe("- finalpred_logits",finalpred_logits)
 describe("tfwspatial",tfwspatial)
-describe("tfwbilateral",tfwbilateral)
+describe("- tfwbilateral",tfwbilateral)
 print("\n")
 
 #---------------------------------------------------------------------
@@ -112,6 +122,7 @@ try:
             myimshow("preds",these_preds[0,:,:,1])
             cv2.waitKey(100)
 except KeyboardInterrupt:
+    quit()
     trainablevars = tf.trainable_variables()
     varsdict = {}
     varsdict['imagefile'] = imfile

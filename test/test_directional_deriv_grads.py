@@ -13,7 +13,7 @@ def simpdesc(name,arr):
     print(str(name))
     print(str(arr))
     print(" ")
-
+from test_utils import normalizeimg
 
 #testimpath = '1_0__crop.jpg'
 testimpath = 'cat.jpg'
@@ -59,12 +59,13 @@ def buildkern(angle, stdv, deriv=False):
     krot = cv2.warpAffine(kk, rotationmatrix, (pixwide,pixwide))
     return krot
 
-if False:
-    gkern10 = buildkern( 0., 8.)
-    gkern01 = buildkern(90., 8.)
+if True:
+    gstd = 5.
+    gkern10 = buildkern( 0., gstd)
+    gkern01 = buildkern(90., gstd)
 
-    dkern10 = buildkern( 0., 8., deriv=True)
-    dkern01 = buildkern(90., 8., deriv=True)
+    dkern10 = buildkern( 0., gstd, deriv=True)
+    dkern01 = buildkern(90., gstd, deriv=True)
 
     gf10 = cv2.filter2D(cvim, -1, gkern10)
     gf11 = cv2.filter2D(gf10, -1, gkern01)
@@ -79,6 +80,10 @@ if False:
     imshow("gf11",gf11)
     imshow("dd10",dd10)
     imshow("dd01",dd01)
+
+    cv2.imwrite('test_directional_BLUR.png',  np.round(normalizeimg(gf11)*255.0).astype(np.uint8))
+    cv2.imwrite('grad_X_true.png',np.round(normalizeimg(dd10)*255.0).astype(np.uint8))
+    cv2.imwrite('grad_Y_true.png',np.round(normalizeimg(dd01)*255.0).astype(np.uint8))
 
 
 thestdv = 5.
@@ -143,6 +148,10 @@ for ii in range(reshwafa.shape[0]):
 def normedfabs(a,b):
     return np.fabs(a-b)
     #return 2.0 * np.fabs(a-b) / (np.fabs(a)+np.fabs(b)+1e-18)
+
+cv2.imwrite('grad_X_testdir_approx.png',np.round(normalizeimg(reshwafa[0,...])*255.0).astype(np.uint8))
+cv2.imwrite('grad_Y_testdir_approx.png',np.round(normalizeimg(reshwafa[1,...])*255.0).astype(np.uint8))
+
 
 err_ggx = normedfabs(true_ggx, reshwafa[0,...])
 err_ggy = normedfabs(true_ggy, reshwafa[1,...])

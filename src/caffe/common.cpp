@@ -3,8 +3,8 @@
 #include <cstdio>
 #include <ctime>
 
-#include "common.hpp"
-#include "rng.hpp"
+#include "caffe/common.hpp"
+#include "caffe/util/rng.hpp"
 
 namespace caffe {
 

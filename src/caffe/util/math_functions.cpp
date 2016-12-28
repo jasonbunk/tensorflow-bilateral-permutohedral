@@ -3,9 +3,8 @@
 
 #include <limits>
 
-#include "common.hpp"
-#include "math_functions.hpp"
-#include "rng.hpp"
+#include "caffe/util/math_functions.hpp"
+#include "caffe/util/rng.hpp"
 
 namespace caffe {
 

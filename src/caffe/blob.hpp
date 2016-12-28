@@ -4,7 +4,7 @@
 #include <vector>
 #include <iostream>
 #include <assert.h>
-#include "debug.hpp" // DebugStr utils
+#include "util/debug.hpp" // DebugStr utils
 
 // if no c++11
 #ifndef nullptr
@@ -51,21 +51,26 @@ private:
 
 //----------------------------------------------------------------------------
 
-#define BLOBCONSTRDEFAULTS  shape_1(0),   \
-                            shape_2(0),   \
-                            shape_3(0),   \
-                            shape_23(0),  \
-                            shape_123(0), \
-                            count_(0),    \
+#define BLOBCONSTRDEFAULTS  is_gpu_(false), \
+                            shape_1(0),     \
+                            shape_2(0),     \
+                            shape_3(0),     \
+                            shape_23(0),    \
+                            shape_123(0),   \
+                            count_(0),      \
                             fromTFtensor(false)
+
+namespace caffe {
 
 template <typename Dtype>
 class Blob {
 public:
     Blob() : BLOBCONSTRDEFAULTS {}
-    Blob(tensorflow::TensorShape const*const input)    : BLOBCONSTRDEFAULTS {ShapeFrom(input);}
-    Blob(tensorflow::Tensor const*const input)         : BLOBCONSTRDEFAULTS {DataFrom_c(input);}
-    Blob(int batch,int chans,int rows,int cols,bool dev):BLOBCONSTRDEFAULTS {alloc(batch,chans,rows,cols,dev);}
+    Blob(tensorflow::TensorShape const*const input, bool is_gpu)    : BLOBCONSTRDEFAULTS {is_gpu_=is_gpu; ShapeFrom(input);}
+    Blob(tensorflow::Tensor const*const input, bool is_gpu)         : BLOBCONSTRDEFAULTS {is_gpu_=is_gpu; DataFrom_c(input);}
+    Blob(int batch,int chans,int rows,int cols,bool dev, bool is_gpu):BLOBCONSTRDEFAULTS {is_gpu_=is_gpu; alloc(batch,chans,rows,cols,dev);}
+
+    void assign_is_gpu(bool is_gpu) {is_gpu_ = is_gpu;}
 
     void DataFrom_c(tensorflow::Tensor const*const input);
     void DataFrom_m(tensorflow::Tensor * input);
@@ -77,8 +82,8 @@ public:
     void alloc(int batch, int chans, int rows, int cols, bool DEVICE_IS_CPU);
     void free_data();
     std::string DebugStr();
-    void debug_visualize_buf_(std::string wname);
-    void debug_visualize_bufdiff_(std::string wname);
+    void debug_visualize_buf_(std::string wname) const;
+    void debug_visualize_bufdiff_(std::string wname) const;
 
     ~Blob() {free_data();}
 
@@ -108,15 +113,15 @@ public:
     int offset(int n)                   const { return   n * shape_123;                                 }
 */
 
-    Dtype const* cpu_data() const {return buf_.c_data();}
-    Dtype const* gpu_data() const {return buf_.c_data();}
-    Dtype * mutable_cpu_data()   const {return buf_.m_data();}
-    Dtype * mutable_gpu_data()   const {return buf_.m_data();}
+    Dtype const* cpu_data() const;
+    Dtype const* gpu_data() const {assert(is_gpu_); return buf_.c_data();}
+    Dtype * mutable_cpu_data()   const {assert(!is_gpu_); return buf_.m_data();}
+    Dtype * mutable_gpu_data()   const { assert(is_gpu_); return buf_.m_data();}
 
-    Dtype const* cpu_diff() const {return bufdiff_.c_data();}
-    Dtype const* gpu_diff() const {return bufdiff_.c_data();}
-    Dtype * mutable_cpu_diff()   const {return bufdiff_.m_data();}
-    Dtype * mutable_gpu_diff()   const {return bufdiff_.m_data();}
+    Dtype const* cpu_diff() const;
+    Dtype const* gpu_diff() const {assert(is_gpu_); return bufdiff_.c_data();}
+    Dtype * mutable_cpu_diff()   const {assert(!is_gpu_); return bufdiff_.m_data();}
+    Dtype * mutable_gpu_diff()   const { assert(is_gpu_); return bufdiff_.m_data();}
 
     void alloc_diff_buf(bool DEVICE_IS_CPU);
 
@@ -134,7 +139,7 @@ public:
     }
 
 private:
-    void debug_visualize(std::string wname, Dtype const*const thebuf);
+    void debug_visualize(std::string wname, Dtype const*const thebuf) const;
     void cpu_alloc(int batch, int chans, int rows, int cols);
     void gpu_alloc(int batch, int chans, int rows, int cols);
     void ResetShapes() {
@@ -146,6 +151,7 @@ private:
         shape_123 = shape_1 * shape_2 * shape_3;
         count_ = shape(0) * shape_123;
     }
+    bool is_gpu_;
     int shape_1;
     int shape_2;
     int shape_3;
@@ -158,5 +164,7 @@ private:
                  // which is already refcounted
     ptr_const_or_mutable<Dtype> bufdiff_;
 };
+
+} // namespace caffe
 
 #endif

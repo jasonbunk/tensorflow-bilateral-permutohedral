@@ -1,15 +1,13 @@
 #!/usr/bin/env python
-import os,sys
-import pickle
-
-# force run on CPU
-os.environ['CUDA_VISIBLE_DEVICES'] = ''
+import os, sys
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 import numpy as np
 import tensorflow as tf
+import cv2
+import pickle
 sys.path.insert(1, os.path.join(sys.path[0], '/mywork/tensorflow-tuts/sd19reader'))
 from myutils import describe
-import cv2
 
 from test_utils import *
 bilateral_filters = load_func_from_lib()
@@ -19,14 +17,13 @@ path2file = os.path.dirname(os.path.realpath(__file__))
 # setup a test
 useCRF = True
 
-imfile = os.path.join(path2file, 'tiny_noisier.png')
-train_x, train_y = load_4channel_truth_img(imfile)
-
 varsdict = pickle.load(open("trained_segment_weights.pkl", "rb"))
 #for key in varsdict:
 #    print(str(key))
 def tfconst(vname, vval):
     return tf.get_variable(vname, initializer=tf.constant(vval), trainable=False)
+
+train_x, train_y = load_4channel_truth_img(varsdict['imagefile'])
 
 tf_x_placehold = tfconst('tf_x_placehold', train_x)
 tf_y_placehold = tfconst('tf_y_placehold', train_y)
@@ -42,19 +39,20 @@ if not useCRF:
     print("NOT using crf")
     finalpred_logits = comp_class
 else:
+    stdv_space = varsdict['stdv_space']
+    stdv_color = varsdict['stdv_color']
     print("using CRF")
-    crfprescale  = tfconst('crfprescale', varsdict['crfprescale:0'])
+    #crfprescale  = tfconst('crfprescale', varsdict['crfprescale:0'])
     tfwspatial   = tfconst('tfwspatial',  varsdict['tfwspatial:0'])
     tfwbilateral = tfconst('tfwbilateral',varsdict['tfwbilateral:0'])
 
-    reshcc = NHWC_to_NCHW(comp_class * crfprescale)
+    reshcc = NHWC_to_NCHW(comp_class)# * crfprescale)
     reshfwrt = NHWC_to_NCHW(tf_x_placehold)
-    ret = bilateral_filters(input=reshcc, #input
+    outbilat = bilateral_filters(input=reshcc, #input
                             featswrt=reshfwrt, #featswrt
-                            stdv_spatial_space=1.5,
-                            stdv_bilater_space=1.5)
-    outspace, outbilat = ret
-    finalpred_logits = NCHW_to_NHWC(outspace * 0.0 * tfwspatial + outbilat * tfwbilateral)
+                            stdv_space=stdv_space,
+                            stdv_color=stdv_color)
+    finalpred_logits = NCHW_to_NHWC(outbilat * tfwbilateral)
 
 finalpred_softmax = tf.nn.softmax(finalpred_logits)
 loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(finalpred_logits, tf_y_placehold))
@@ -75,7 +73,6 @@ tf.initialize_all_variables().run()
 savecheckvars = []
 savecheckvars.append(reshcc.eval())
 savecheckvars.append(reshfwrt.eval())
-savecheckvars.append(outspace.eval())
 savecheckvars.append(outbilat.eval())
 
 # computes gradient dy/dx
@@ -91,7 +88,7 @@ def myimshow(wname,grad,gradshape):
     assert np.prod(gradshape) == grad.size
     amin = np.amin(grad)
     amax = np.amax(grad)
-    gvis = (grad-amin)/(amax-amin)
+    gvis = (grad-amin)/(amax-amin+1e-12)
     gres = prepareasmat(gvis, gradshape)
     scf = 6
     newsize = tuple([scf*gg for gg in gradshape[2:4]])
@@ -146,6 +143,9 @@ for ii in range(100):
     savecheckvars.append(prepareasmat(compgrads['xxx'],   myvars['xxx'][1]))
     savecheckvars.append(prepareasmat(compgrads['wrt'],   myvars['wrt'][1]))
     savecheckvars.append(prepareasmat(compgrads['outbi'], myvars['outbi'][1]))
+    #savecheckvars.append(varsdict['crfprescale:0'])
+    savecheckvars.append(stdv_space)
+    savecheckvars.append(stdv_color)
 
     pickle.dump(savecheckvars, open("trained_segment_reshcc.pkl", "wb"))
     print("dumped savecheckvars to trained_segment_reshcc")

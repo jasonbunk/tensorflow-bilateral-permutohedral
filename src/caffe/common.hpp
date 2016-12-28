@@ -14,8 +14,16 @@
 #include <utility>  // pair
 #include <vector>
 
-#include "device_alternate.hpp"
-#include "check_macros.hpp"
+#include "caffe/util/device_alternate.hpp"
+#include "util/check_macros.hpp"
+
+//#define MYASSERT(cond, text) if(!(cond)){printf(text);assert(cond);assert(0);}
+#define MYASSERT(cond, text1, ...) if(!(cond)){printf(text1, ##__VA_ARGS__); assert(cond);}
+
+// if no c++11
+#ifndef nullptr
+#define nullptr NULL
+#endif
 
 // Convert macro to string
 #define STRINGIFY(m) #m
