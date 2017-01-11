@@ -4,8 +4,8 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 import tensorflow as tf
 import cv2
 import numpy as np
-sys.path.insert(1, os.path.join(sys.path[0], '/mywork/tensorflow-tuts/sd19reader'))
-from myutils import describe
+#sys.path.insert(1, os.path.join(sys.path[0], '/mywork/tensorflow-tuts/sd19reader'))
+#from myutils import describe
 
 # load image
 path2file = os.path.dirname(os.path.realpath(__file__))
@@ -48,10 +48,10 @@ def updateWindow(xxx):
 
     tfret = outbilat.eval({tf_placehold_img: testim, tf_placehold_wrt: featswrt})
 
-    describe("tfret00", tfret)
+    #describe("tfret00", tfret)
     tfret[tfret<0.0] = 0.0
     tfret[tfret>1.0] = 1.0
-    describe("tfret11", tfret)
+    #describe("tfret11", tfret)
     cv2.imshow("ImageWindow", tfret[0,...])
 
 cv2.namedWindow('ImageWindow')

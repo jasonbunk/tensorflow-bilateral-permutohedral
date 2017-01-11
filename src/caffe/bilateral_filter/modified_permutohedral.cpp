@@ -1,5 +1,5 @@
 #include "modified_permutohedral.h"
-#include "caffe/layers/testopencvpreview_layer.hpp" // DEBUGGGGGGGGGGGGGG: buf visualize
+//#include "caffe/layers/testopencvpreview_layer.hpp" // DEBUGGGGGGGGGGGGGG: buf visualize
 
 namespace permutohedral {
 /************************************************/
@@ -327,7 +327,7 @@ void PermutohedralOp_CPU<Dtype>::Forward(caffe::Blob<Dtype> const* input_tosmoot
   Dtype* out = output_bilat->mutable_cpu_data();
 
   std::cout<<"PermutohedralOp_CPU<Dtype>::Forward -- visualizing buf (1/2)"<<std::endl;
-  caffe::visualize_buf(output_bilat);
+  //caffe::visualize_buf(output_bilat);
 
   int vstride = input_tosmooth->count() / input_tosmooth->shape(0);
   int pstride = input_featswrt->count() / input_featswrt->shape(0);
@@ -337,7 +337,7 @@ void PermutohedralOp_CPU<Dtype>::Forward(caffe::Blob<Dtype> const* input_tosmoot
   }
 
   std::cout<<"PermutohedralOp_CPU<Dtype>::Forward -- visualizing buf (2/2)"<<std::endl;
-  caffe::visualize_buf(output_bilat);
+  //caffe::visualize_buf(output_bilat);
 }
 
 template <typename Dtype>
@@ -349,6 +349,7 @@ void PermutohedralOp_CPU<Dtype>::Backward(bool require_tosmooth_grad,
   if(!require_tosmooth_grad) return;
   CHECK(!require_featswrt_grad);
   std::cout<<"CPU???????????????????????????????????"<<std::endl;
+  CHECK(false);
   assert(0);
 
   //const Dtype* out     = output_bilat->cpu_data();

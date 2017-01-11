@@ -73,14 +73,14 @@ nchwcat_bilat = nchw_cat / tf.constant(1e-9 + npwbilateral)
 ret = bilateral_filters(tf.Print(nchwcat_space, [nchwcat_space], msgstr+"input"),
                         tf.Print(nchwcat_space, [nchwcat_space], msgstr+"featswrt"),
                         stdv, stdv)
-outspace,_ = ret
-outspace = tf.Print(outspace, [outspace], msgstr+"outspace")
+outspace = ret
+#outspace = tf.Print(outspace, [outspace], msgstr+"outspace")
 
 ret = bilateral_filters(nchwcat_bilat,
                         nchwcat_bilat,
                         stdv, stdv)
-_,outbilat = ret
-outbilat = tf.Print(outbilat, [outbilat], msgstr+"outbilat")
+outbilat = ret
+#outbilat = tf.Print(outbilat, [outbilat], msgstr+"outbilat")
 
 SCALEDoutsp = (outspace * npwspatial)
 SCALEDoutbi = (outbilat * npwbilateral)

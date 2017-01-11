@@ -1,9 +1,4 @@
-/*!
- * Copyright (c) 2016 by Contributors
- * \file permutohedral-inl.h
- * \brief
- * \author Junyuan Xie
-*/
+// see LICENSE_mxnet_permutohedral
 #ifndef MXNET_OPERATOR_PERMUTOHEDRAL_INL_H_
 #define MXNET_OPERATOR_PERMUTOHEDRAL_INL_H_
 #include <cstring>

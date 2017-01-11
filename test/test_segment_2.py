@@ -56,34 +56,37 @@ NUMITERS = 10000
 #comp_class = conv1x1(comp_conv1,     3, 2, None,      "comp_class")
 comp_class = conv1x1(tf_x_placehold,  3, 2, None,      "comp_class")
 
-tf_x_pad = tf.pad(tf_x_placehold, [[0,0],[1,1],[1,1],[0,0]], mode='SYMMETRIC')
-padconvembed = conv1x1(tf_x_pad, 3, 1, activation_fn=tf.tanh, kernelwidth=3)
+#tfwspatial   = tf.get_variable('tfwspatial',  initializer=tf.constant(1.0))
+
+#tf_x_pad = tf.pad(tf_x_placehold, [[0,0],[1,1],[1,1],[0,0]], mode='SYMMETRIC')
+#padconvembed = conv1x1(tf_x_pad, 3, 1, activation_fn=tf.tanh, kernelwidth=3)
+padconvembed = tf.concat(3, [tf_x_placehold, tf.nn.softmax(comp_class)[:,:,:,:1]])
 
 #print(" ")
 describe("- tf_x_placehold", tf_x_placehold)
-describe("- tf_x_pad", tf_x_pad)
+#describe("- tf_x_pad", tf_x_pad)
 describe("- padconvembed", padconvembed)
 print(" ")
 #quit()
 #----------------------------------------
 
 #crfprescale  = None
-tfwspatial   = None
+#tfwspatial   = None
 tfwbilateral = None
 if not useCRF:
     print("NOT using crf")
     finalpred_logits = comp_class
 else:
     stdv_space = 1.2
-    stdv_color = 0.333
+    stdv_color = 0.5
     print("using CRF")
     #crfprescale  = tf.get_variable('crfprescale', initializer=tf.constant(1.0))
-    tfwspatial   = tf.get_variable('tfwspatial',  initializer=tf.constant(1.0))
+
     tfwbilateral = tf.get_variable('tfwbilateral',initializer=tf.constant(1.0))
 
     reshcc = NHWC_to_NCHW(comp_class)# * crfprescale)
     outbilat = bilateral_filters(input=reshcc, #input
-                            featswrt=NHWC_to_NCHW(padconvembed * tfwspatial), #featswrt
+                            featswrt=NHWC_to_NCHW(padconvembed), #featswrt
                             stdv_space=stdv_space,
                             stdv_color=stdv_color)
     finalpred_logits = NCHW_to_NHWC(outbilat * tfwbilateral)
@@ -98,8 +101,8 @@ if useCRF:
 #describe("tf_x_placehold",tf_x_placehold)
 describe("- tf_y_placehold",tf_y_placehold)
 describe("- finalpred_logits",finalpred_logits)
-describe("tfwspatial",tfwspatial)
-describe("- tfwbilateral",tfwbilateral)
+#describe("tfwspatial",tfwspatial)
+#describe("- tfwbilateral",tfwbilateral)
 print("\n")
 
 #---------------------------------------------------------------------

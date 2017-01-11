@@ -1,9 +1,4 @@
-/*!
- * Copyright (c) 2016 by Contributors
- * \file permutohedral.cu
- * \brief
- * \author Junyuan Xie
-*/
+// see LICENSE_mxnet_permutohedral
 #include "permutohedral_ops.h"
 #include "cu_hash_table.h"
 #include "caffe/util/device_alternate.hpp"
@@ -451,6 +446,7 @@ void PermutohedralOp_template_GPU<Dtype,key_size>::do_init(cudaStream_t stream,
     //}
     n_elements_ = input_tosmooth->count()/batch_size_/data_size_;
     n_keys_ = n_elements_*(key_size+1);
+    CHECK_EQ(n_elements_*batch_size_*data_size_, input_tosmooth->count());
     CHECK_EQ(input_featswrt->count()/(input_featswrt->shape(0)*input_featswrt->shape(1)), n_elements_);
     CHECK_GE(input_featswrt->shape(1), 1);
 
@@ -505,7 +501,7 @@ void PermutohedralOp_template_GPU<Dtype,key_size>::Filter(cudaStream_t stream, p
                                          const float *data, float *out, float *norm) {
   using namespace permutohedral;
 
-  CUDA_CHECK(cudaMemset(vals_, 0, n_keys_*val_size*sizeof(float)));
+  CUDA_CHECK(cudaMemsetAsync(vals_, 0, n_keys_*val_size*sizeof(float), stream));
   if (normalize) {
     splat<key_size, true><<<dim3(1, (n_elements_-1)/(lblock_/(key_size+1))+1, 1), dim3(key_size+1, lblock_/(key_size+1), 1), 0, stream>>>(
       *table, n_elements_, val_size, data, vals_, matrix_);
@@ -557,14 +553,15 @@ void PermutohedralOp_template_GPU<Dtype,key_size>::Forward(cudaStream_t* stream,
   const Dtype* in  = input_tosmooth->gpu_data();
   const Dtype* pos = input_featswrt->gpu_data();
   Dtype* out = output_bilat->mutable_gpu_data();
+  const int batchstep = (key_size - spatialposdim_) * n_elements_;
 
   CuHashTable<key_size> table(n_keys_, entries_, keys_);
 
   for (int i = 0; i < batch_size_; ++i) {
-    CUDA_CHECK(cudaMemset(entries_, -1, n_keys_*2*sizeof(int32_t)));
+    CUDA_CHECK(cudaMemsetAsync(entries_, -1, n_keys_*2*sizeof(int32_t), *stream));
 
     init<key_size><<<dim3(nblock_, 1, 1), dim3(lblock_,1,1), 0, *stream>>>(
-      table, n_elements_, spatialposfeats_, spatialposdim_, pos + i*key_size*n_elements_, scale_, matrix_);
+      table, n_elements_, spatialposfeats_, spatialposdim_, pos + i*batchstep, scale_, matrix_);
     CUDA_POST_KERNEL_CHECK;
     CHECK_EQ(cudaGetLastError(), cudaSuccess);
 
@@ -604,14 +601,15 @@ void PermutohedralOp_template_GPU<Dtype,key_size>::Backward(cudaStream_t* stream
       Dtype* data_grad = input_tosmooth->mutable_gpu_diff();
   const Dtype* pos     = input_featswrt->gpu_data();
       Dtype* pos_grad  = input_featswrt->mutable_gpu_diff();
+  const int batchstep = (key_size - spatialposdim_) * n_elements_;
 
   CuHashTable<key_size> table(n_keys_, entries_, keys_);
 
   for (int i = 0; i < batch_size_; ++i) {
-    CUDA_CHECK(cudaMemset(entries_, -1, n_keys_*2*sizeof(int32_t)));
+    CUDA_CHECK(cudaMemsetAsync(entries_, -1, n_keys_*2*sizeof(int32_t), *stream));
 
     init<key_size><<<dim3(nblock_, 1, 1), dim3(lblock_,1,1), 0, *stream>>>(
-      table, n_elements_, spatialposfeats_, spatialposdim_, pos + i*key_size*n_elements_, scale_, matrix_);
+      table, n_elements_, spatialposfeats_, spatialposdim_, pos + i*batchstep, scale_, matrix_);
     CUDA_POST_KERNEL_CHECK;
     CHECK_EQ(cudaGetLastError(), cudaSuccess);
 
@@ -628,7 +626,7 @@ void PermutohedralOp_template_GPU<Dtype,key_size>::Backward(cudaStream_t* stream
       pos_grad_init<key_size, true><<<dim3(nblock_, 1, 1), dim3(lblock_, 1, 1), 0, *stream>>>(
         n_elements_, val_size_,
         ograd + i*data_size_*n_elements_,
-        spatialposfeats_, spatialposdim_, pos + i*key_size*n_elements_,
+        spatialposfeats_, spatialposdim_, pos + i*batchstep,
         data + i*data_size_*n_elements_,
         out + i*data_size_*n_elements_,
         norm + i*n_elements_,
@@ -644,12 +642,12 @@ void PermutohedralOp_template_GPU<Dtype,key_size>::Backward(cudaStream_t* stream
       pos_grad_reduce<key_size, true><<<dim3(nblock_, 1, 1), dim3(lblock_, 1, 1), 0, *stream>>>(
         n_elements_, val_size_,
         ograd + i*data_size_*n_elements_,
-        spatialposfeats_, spatialposdim_, pos + i*key_size*n_elements_,
+        spatialposfeats_, spatialposdim_, pos + i*batchstep,
         data + i*data_size_*n_elements_,
         out + i*data_size_*n_elements_,
         norm + i*n_elements_,
         key_size%2 ? new_vals_ : vals_,
-        pos_grad + i*key_size*n_elements_);
+        pos_grad + i*batchstep);
       CUDA_POST_KERNEL_CHECK;
       CHECK_EQ(cudaGetLastError(), cudaSuccess);
     }

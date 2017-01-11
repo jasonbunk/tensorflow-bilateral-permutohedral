@@ -16,6 +16,8 @@ path2file = os.path.dirname(os.path.realpath(__file__))
 #---------------------------------------------------------------------
 # setup a test
 
+BATCHMODE = True
+
 def myimshow(wname, im):
     if (im.shape[0]*im.shape[1]) < (50*50):
         cv2.imshow(wname, cv2.resize(im, (0,0), fx=2.0, fy=2.0, interpolation=cv2.INTER_NEAREST))
@@ -27,6 +29,10 @@ train_x, train_y = load_4channel_truth_img(imfile)
 
 xmean = np.mean(train_x, axis=(1,2), keepdims=True)
 train_x -= xmean
+
+if BATCHMODE:
+    train_x = np.tile(train_x,(5,1,1,1))
+    train_y = np.tile(train_y,(5,1,1,1))
 
 myvars = {}
 myvars['xxx'] = train_x

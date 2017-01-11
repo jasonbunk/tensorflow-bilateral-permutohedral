@@ -88,7 +88,7 @@ for tehpatchs in [patches, procpatches]:
 #define the function that's called every time one of the trackbars is moved
 def updateWindow(xxx):
     stdspace = float(cv2.getTrackbarPos('std_space*10','ImageWindow')) / 10.
-    stdcolor = float(cv2.getTrackbarPos('std_color*10','ImageWindow')) / 10.
+    stdcolor = float(cv2.getTrackbarPos('std_color*50','ImageWindow')) / 50.
 
     stdspace = max(1e-3, stdspace)
     stdcolor = max(1e-3, stdcolor)
@@ -101,7 +101,7 @@ def updateWindow(xxx):
     ret = bilateral_filters(NHWC_to_NCHW(tf_placehold_img),
                             NHWC_to_NCHW(tf_placehold_wrt),
                             stdspace, stdcolor)
-    _,outbilNCHW = ret
+    outbilNCHW = ret
     outbilat = NCHW_to_NHWC(outbilNCHW)
 
     tfret = outbilat.eval({tf_placehold_img: batchunpadtest, tf_placehold_wrt: reshtransfpatch})
@@ -114,6 +114,6 @@ def updateWindow(xxx):
 
 cv2.namedWindow('ImageWindow')
 cv2.createTrackbar('std_space*10','ImageWindow',1,200,updateWindow)
-cv2.createTrackbar('std_color*10','ImageWindow',1,200,updateWindow)
+cv2.createTrackbar('std_color*50','ImageWindow',1,200,updateWindow)
 updateWindow(0) #Creates the window for the first time
 cv2.waitKey(0)
