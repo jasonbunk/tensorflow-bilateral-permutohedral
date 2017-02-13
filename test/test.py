@@ -4,8 +4,6 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 import numpy as np
 import tensorflow as tf
-sys.path.insert(1, os.path.join(sys.path[0], '/mywork/tensorflow-tuts/sd19reader'))
-from myutils import describe
 
 from test_utils import *
 bilateral_filters = load_func_from_lib()

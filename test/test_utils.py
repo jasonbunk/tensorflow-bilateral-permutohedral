@@ -116,3 +116,45 @@ def NCHW_to_NHWC(arr):
         return tf.transpose(arr, perm=(0,2,3,1))
     except:
         return arr.transpose((0,2,3,1))
+
+# print information about a Python variable,
+# with more detailed information if it is a Numpy or Tensorflow array
+def describe(name,arr,extranewline=None):
+    name = str(name)
+    try:
+        shapestr = ", shape "+str(arr.shape)
+    except:
+        try:
+            shapestr = ", shape "+str(arr.get_shape())
+        except:
+            shapestr = ""
+    try:
+        print(name+": dtype "+str(arr.dtype)+shapestr \
+             +", (min,max) = ("+str(np.amin(arr))+", "+str(np.amax(arr))+")" \
+            +", (mean,std) = ("+str(np.mean(arr))+", "+str(np.std( arr))+")" \
+            +", median "+str(np.median(arr)))
+        if arr.size <= 4:
+            print(str(arr))
+    except:
+        try:
+            arrlen = len(arr)
+            print(name+": type "+str(type(arr))+shapestr+", len = "+str(arrlen))
+            MAXLEN = 8
+            if arrlen <= MAXLEN:
+                ps1 = None
+                for ii in range(min(arrlen,MAXLEN)):
+                    if ps1 is None:
+                        ps1 = ""
+                    else:
+                        ps1 += ", "
+                    ps1 += str(arr[ii])
+                if len(ps1) <= 150:
+                    print("    "+ps1)
+                ps2 = ""
+                for ii in range(min(arrlen,MAXLEN)):
+                    ps2 += "["+str(ii)+"]:"+str(type(arr[ii]))+" "
+                print("    "+ps2)
+        except:
+            print(name+": type "+str(type(arr))+shapestr)
+    if extranewline is not None:
+        print(str(extranewline))

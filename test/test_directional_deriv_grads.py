@@ -5,15 +5,12 @@ import matplotlib.pyplot as plt
 import cv2
 path2file = os.path.dirname(os.path.realpath(__file__))
 
-sys.path.insert(1, os.path.join(sys.path[0], '/mywork/tensorflow-tuts/sd19reader'))
-from myutils import describe
-
 from test_directions_permutohedral import get_permutohedral_basis
 def simpdesc(name,arr):
     print(str(name))
     print(str(arr))
     print(" ")
-from test_utils import normalizeimg
+from test_utils import *
 
 #testimpath = '1_0__crop.jpg'
 testimpath = 'cat.jpg'

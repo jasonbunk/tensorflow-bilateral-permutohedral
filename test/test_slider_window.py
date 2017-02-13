@@ -4,8 +4,6 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 import tensorflow as tf
 import cv2
 import numpy as np
-#sys.path.insert(1, os.path.join(sys.path[0], '/mywork/tensorflow-tuts/sd19reader'))
-#from myutils import describe
 
 # load image
 path2file = os.path.dirname(os.path.realpath(__file__))

@@ -2,8 +2,7 @@ import os,sys
 import numpy as np
 import numpy.linalg as npl
 import matplotlib.pyplot as plt
-sys.path.insert(1, os.path.join(sys.path[0], '/mywork/tensorflow-tuts/sd19reader'))
-from myutils import describe
+from test_utils import *
 def simpdesc(name,arr):
     print(str(name))
     print(str(arr))
