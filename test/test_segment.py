@@ -22,15 +22,15 @@ def myimshow(wname, im):
     else:
         cv2.imshow(wname, im)
 
-imfile = os.path.join(path2file, 'tiny_noisier.png')
+imfile = os.path.join(path2file, 'orange_target.png')
 train_x, train_y = load_4channel_truth_img(imfile)
 
 xmean = np.mean(train_x, axis=(1,2), keepdims=True)
 train_x -= xmean
 
 if BATCHMODE:
-    train_x = np.tile(train_x,(5,1,1,1))
-    train_y = np.tile(train_y,(5,1,1,1))
+    train_x = np.tile(train_x,(2,1,1,1))
+    train_y = np.tile(train_y,(2,1,1,1))
 
 myvars = {}
 myvars['xxx'] = train_x
@@ -45,8 +45,6 @@ myimshow("train_y_1",train_y[0,:,:,1])
 
 describe("train_x",train_x)
 describe("train_y",train_y)
-#cv2.waitKey(0)
-#quit()
 
 tf_x_placehold = tf.placeholder(tf.float32, train_x.shape, name="tf_x_placehold")
 tf_y_placehold = tf.placeholder(tf.float32, train_y.shape, name="tf_x_placehold")
@@ -56,8 +54,6 @@ useCRF = True
 LEARNRATE = 0.01
 NUMITERS = 10000
 
-#comp_conv1 = conv1x1(tf_x_placehold, 3, 3, tf.nn.elu, "comp_conv1")
-#comp_class = conv1x1(comp_conv1,     3, 2, None,      "comp_class")
 comp_class = conv1x1(tf_x_placehold,  3, 2, None,      "comp_class")
 #----------------------------------------
 
@@ -68,7 +64,7 @@ if not useCRF:
     print("NOT using crf")
     finalpred_logits = comp_class
 else:
-    stdv_space = 1.2
+    stdv_space = 3.
     stdv_color = 1.2
     print("using CRF")
     #crfprescale  = tf.get_variable('crfprescale', initializer=tf.constant(1.0))
@@ -83,12 +79,12 @@ else:
     finalpred_logits = NCHW_to_NHWC(outbilat * tfwbilateral)
 
 finalpred_softmax = tf.nn.softmax(finalpred_logits)
-total_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(finalpred_logits, tf_y_placehold))
+total_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=finalpred_logits, labels=tf_y_placehold))
 
 train_step = tf.train.AdamOptimizer(LEARNRATE).minimize(total_loss)
 
 if useCRF:
-    print("constructed the filter!!!!!!!!!!!!!!!!!!!!!!")
+    print("constructed the CRF filter!!!")
 describe("tf_x_placehold",tf_x_placehold)
 describe("tf_y_placehold",tf_y_placehold)
 describe("finalpred_logits",finalpred_logits)
